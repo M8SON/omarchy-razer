@@ -33,17 +33,50 @@ fi
 # 3. restore_persistence. The daemon writes persistence.conf on exit either way,
 #    but only reads it back at startup when this is True -- which is why lights
 #    come back dead after a reboot on a default install.
-mkdir -p "$(dirname "$CONF")"
-if [[ -f $CONF ]] && grep -q '^restore_persistence' "$CONF"; then
-  if grep -q '^restore_persistence = True' "$CONF"; then
-    say "restore_persistence already True"
-  else
-    say "Setting restore_persistence = True"
-    sed -i 's/^restore_persistence.*/restore_persistence = True/' "$CONF"
-  fi
+#
+#    razer.conf sits at a predictable path under $HOME, so this refuses to edit
+#    through a symlink or a non-regular file: `sed -i` and `>>` would follow one
+#    and rewrite whatever it points at. The write itself goes to a private temp
+#    file in the same directory and is renamed into place, so the config is
+#    replaced atomically and never edited in place.
+CONF_DIR="$(dirname "$CONF")"
+
+if [[ -L $CONF_DIR ]]; then
+  echo "refusing: $CONF_DIR is a symlink" >&2
+  exit 1
+fi
+mkdir -p "$CONF_DIR"
+if [[ ! -d $CONF_DIR ]]; then
+  echo "refusing: $CONF_DIR is not a directory" >&2
+  exit 1
+fi
+if [[ -L $CONF ]]; then
+  echo "refusing: $CONF is a symlink" >&2
+  exit 1
+fi
+if [[ -e $CONF && ! -f $CONF ]]; then
+  echo "refusing: $CONF is not a regular file" >&2
+  exit 1
+fi
+
+if [[ -f $CONF ]] && grep -q '^restore_persistence = True' "$CONF"; then
+  say "restore_persistence already True"
 else
   say "Setting restore_persistence = True"
-  printf '\n[Startup]\nrestore_persistence = True\n' >> "$CONF"
+  tmp="$(mktemp "$CONF_DIR/.razer.conf.XXXXXX")"
+  trap 'rm -f "${tmp:-}"' EXIT
+  if [[ -f $CONF ]]; then
+    if grep -q '^restore_persistence' "$CONF"; then
+      sed 's/^restore_persistence.*/restore_persistence = True/' "$CONF" >"$tmp"
+    else
+      { cat "$CONF"; printf '\n[Startup]\nrestore_persistence = True\n'; } >"$tmp"
+    fi
+  else
+    printf '[Startup]\nrestore_persistence = True\n' >"$tmp"
+  fi
+  chmod 644 "$tmp"
+  mv -f "$tmp" "$CONF"
+  trap - EXIT
 fi
 
 # 4. Daemon.
