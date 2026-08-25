@@ -25,6 +25,29 @@ omarchy plugin enable daedalus.razer right
 `setup.sh` installs `openrazer-daemon`, adds you to the `openrazer` group, and
 sets `restore_persistence = True`. Skip it only if OpenRazer already works.
 
+## Uninstall
+
+```bash
+omarchy plugin disable daedalus.razer
+omarchy plugin remove daedalus.razer
+```
+
+That takes the widget off the bar and deletes the plugin folder. `setup.sh`
+changed three things *outside* the plugin, and none of them are reverted
+automatically — undo them only if you want OpenRazer gone entirely:
+
+```bash
+systemctl --user disable --now openrazer-daemon
+sudo gpasswd -d "$USER" openrazer      # log out and back in to take effect
+sed -i 's/^restore_persistence.*/restore_persistence = False/' \
+  ~/.config/openrazer/razer.conf
+rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-razer"
+omarchy pkg drop openrazer-daemon python-openrazer
+```
+
+The last line also removes the DKMS kernel module. Leaving the daemon installed
+is harmless if you use any other Razer tool.
+
 ## Use
 
 - **Left-click** the bar icon to open the panel
