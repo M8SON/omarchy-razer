@@ -5,6 +5,8 @@ effects, and colour — without the polychromatic tray applet.
 
 ![kind](https://img.shields.io/badge/kind-bar--widget-blue) ![omarchy](https://img.shields.io/badge/omarchy-4.x-green)
 
+![The panel: device switcher, brightness, effect grid, and the HSV colour wheel](preview.png)
+
 ## Why
 
 Polychromatic's tray applet works, but it rides in on
