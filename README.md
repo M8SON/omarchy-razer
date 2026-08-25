@@ -77,14 +77,17 @@ matches, the custom frame is what is on screen, and the moment it differs
 another client has set an effect and the live value wins. The stored colour also
 lets the wheel reopen on the colour the device is actually showing.
 
-**Static is painted as a per-key custom frame, not `fx.static()`.** Setting a
-*named* effect makes at least the Huntsman V3 Pro Mini crossfade to the new
-colour over ~1.5 s, which feels broken on a colour wheel. A custom frame is
-applied immediately. The daemon then reports the effect as `custom`, so the
-helper maps that back to `static` for the UI. Devices without per-key matrix
-support fall back to `fx.static()` automatically. The animated effects
-(spectrum, breath, wave, reactive, starlight) stay as named effects, since the
-firmware is what runs them.
+**Static calls `fx.static()` *and then* paints a per-key custom frame.** Both
+matter. Setting a named effect makes at least the Huntsman V3 Pro Mini
+crossfade to the new colour over ~1.5 s, which feels broken on a colour wheel;
+the custom frame lands instantly and overrides that ramp. But a custom frame
+never updates `fx.effect`, so on its own it leaves the daemon believing the
+device is still running whatever effect preceded it — which `restore_persistence`
+then faithfully restores at the next boot. Calling `fx.static()` first keeps the
+daemon's bookkeeping correct, so `persistence.conf` records `static` plus the
+colour and the right thing comes back after a reboot. Devices without per-key
+matrix support simply get the named effect. The animated effects stay as named
+effects, since the firmware is what runs them.
 
 Raw sysfs is deliberately **not** used, for reasons worth writing down:
 

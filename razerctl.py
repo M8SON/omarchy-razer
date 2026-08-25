@@ -74,17 +74,12 @@ def save_state():
         pass
 
 
-def remember(serial, effect, color=None, baseline=None):
+def remember(serial, effect, color=None):
     entry = {"effect": effect}
     if color is not None:
         entry["color"] = list(color)
     elif serial in _state and "color" in _state[serial]:
         entry["color"] = _state[serial]["color"]
-    # What fx.effect read at the moment we painted a custom frame. While it
-    # still reads that, our frame is what is on screen; once it changes,
-    # something else set an effect and the live value is the truth.
-    if baseline is not None:
-        entry["baseline"] = baseline
     _state[serial] = entry
     save_state()
 
@@ -151,22 +146,14 @@ def read_brightness(device):
 
 
 def read_effect(device):
+    # Always live. Because a static apply calls fx.static() before painting the
+    # frame, the daemon's own bookkeeping is correct and needs no second-
+    # guessing -- which also means an effect set in polychromatic just works.
     try:
         raw = str(device.fx.effect)
     except Exception:
-        raw = None
-    effect = EFFECT_ALIASES.get(raw.lower(), raw) if raw is not None else None
-
-    # A custom frame never updates fx.effect, so it keeps reporting whichever
-    # named effect preceded it. Trust our record only while fx.effect still
-    # matches the value captured when the frame was drawn; the moment it
-    # differs, another client set an effect and the live value wins.
-    entry = _state.get(device.serial)
-    if (entry and entry.get("effect") == "static"
-            and entry.get("baseline") is not None
-            and raw == entry["baseline"]):
-        return "static"
-    return effect
+        return None
+    return EFFECT_ALIASES.get(raw.lower(), raw)
 
 
 def read_color(device):
@@ -301,9 +288,15 @@ def cmd_effect(serial, name, rgb):
         if name == "spectrum":
             fx.spectrum()
         elif name == "static":
+            # Both, in this order, and each is load-bearing:
+            #   fx.static() tells the daemon what the device is doing, so
+            #     fx.effect reads back correctly and persistence.conf records
+            #     "static" plus the colour -- restore_persistence then brings
+            #     the right thing back at boot.
+            #   the custom frame lands instantly, overriding the ~1.5s
+            #     firmware crossfade that a named effect triggers.
+            fx.static(r, g, b)
             used_custom = apply_static(device, r, g, b)
-            if not used_custom:
-                fx.static(r, g, b)
         elif name == "breath":
             fx.breath_single(r, g, b)
         elif name == "wave":
@@ -317,13 +310,9 @@ def cmd_effect(serial, name, rgb):
     except Exception as exc:
         fail("could not apply %s: %s" % (name, exc))
 
-    baseline = None
-    if used_custom:
-        try:
-            baseline = str(device.fx.effect)
-        except Exception:
-            baseline = None
-    remember(serial, name, (r, g, b) if takes_color else None, baseline)
+    # The colour is still worth keeping: openrazer exposes the active effect but
+    # not the colour it was given, and the wheel wants to reopen where it was.
+    remember(serial, name, (r, g, b) if takes_color else None)
 
     return {"serial": serial, "effect": read_effect(device)}
 
