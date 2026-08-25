@@ -17,7 +17,7 @@ instead, so it behaves like every other Omarchy widget.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/<you>/omarchy-razer
+omarchy plugin add https://github.com/M8SON/omarchy-razer
 bash ~/.config/omarchy/plugins/daedalus.razer/setup.sh   # first time only
 omarchy plugin enable daedalus.razer right
 ```
