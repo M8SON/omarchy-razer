@@ -8,6 +8,12 @@ device_mode accept writes, report success, and change nothing -- while the
 daemon reports the true values. Never write device_mode: driver mode (0x03)
 silently disables the keyboard's HID input until it is physically replugged.
 
+This helper writes no files. Everything it reports is read live from the
+daemon, which is both simpler and more correct than a local cache: the daemon
+already tracks the active effect and its colours, and reading them picks up
+changes made by other clients (polychromatic, razer-cli) that a cache cannot
+see.
+
 Two modes:
 
   one-shot   razerctl.py list | brightness | effect | dpi | pollrate ...
@@ -20,77 +26,40 @@ capped updates at ~9/sec. Held open, samples land in single-digit milliseconds.
 """
 
 import json
-import os
 import sys
 
-# Effects we expose, in menu order, mapped to the openrazer capability that
-# gates them and whether they consume the RGB triple.
+# Effects we expose, in menu order: (name, gating capability, colours consumed).
+#
+# breath_triple (3 colours) and wheel (a wheel-zone effect) are deliberately
+# absent: three pickers is more UI than the effect earns, and wheel belongs
+# with per-zone control, which this plugin does not do yet.
 EFFECTS = [
-    ("spectrum",  "lighting_spectrum",         False),
-    ("static",    "lighting_static",           True),
-    ("breath",    "lighting_breath_single",    True),
-    ("wave",      "lighting_wave",             False),
-    ("reactive",  "lighting_reactive",         True),
-    ("starlight", "lighting_starlight_single", True),
-    ("none",      "lighting_none",             False),
+    ("spectrum",         "lighting_spectrum",          0),
+    ("static",           "lighting_static",            1),
+    ("breath",           "lighting_breath_single",     1),
+    ("breath_dual",      "lighting_breath_dual",       2),
+    ("breath_random",    "lighting_breath_random",     0),
+    ("wave",             "lighting_wave",              0),
+    ("reactive",         "lighting_reactive",          1),
+    ("ripple",           "lighting_ripple",            1),
+    ("ripple_random",    "lighting_ripple_random",     0),
+    ("starlight",        "lighting_starlight_single",  1),
+    ("starlight_dual",   "lighting_starlight_dual",    2),
+    ("starlight_random", "lighting_starlight_random",  0),
+    ("none",             "lighting_none",              0),
 ]
 
 _manager = None
 
-# What this plugin last applied, per serial: {"effect": str, "color": [r,g,b]}.
-#
-# Persisted rather than kept in memory because device.fx.effect is client-side
-# bookkeeping that advanced.draw() never updates -- after a custom frame it
-# reports whichever *named* effect was set last. The helper also exits when the
-# panel has been closed for a while, so in-memory tracking would forget a solid
-# colour on every idle cycle and show "Off" for a lit keyboard. Carrying the
-# colour too lets the wheel reopen where the user left it.
-STATE_PATH = os.path.join(
-    os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
-    "omarchy-razer", "state.json")
-
-_state = {}
-
-
-def load_state():
-    global _state
-    try:
-        with open(STATE_PATH) as handle:
-            loaded = json.load(handle)
-        _state = loaded if isinstance(loaded, dict) else {}
-    except Exception:
-        _state = {}
-
-
-def save_state():
-    try:
-        os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
-        tmp = STATE_PATH + ".tmp"
-        with open(tmp, "w") as handle:
-            json.dump(_state, handle)
-        os.replace(tmp, STATE_PATH)
-    except Exception:
-        # Losing the cache costs a stale effect label, never a failed command.
-        pass
-
-
-def remember(serial, effect, color=None):
-    entry = {"effect": effect}
-    if color is not None:
-        entry["color"] = list(color)
-    elif serial in _state and "color" in _state[serial]:
-        entry["color"] = _state[serial]["color"]
-    _state[serial] = entry
-    save_state()
-
 # The daemon reports its internal effect names; the plugin uses short ones.
 EFFECT_ALIASES = {
     "breathsingle": "breath",
-    "breathdual": "breath",
-    "breathrandom": "breath",
+    "breathdual": "breath_dual",
+    "breathrandom": "breath_random",
     "starlightsingle": "starlight",
-    "starlightdual": "starlight",
-    "starlightrandom": "starlight",
+    "starlightdual": "starlight_dual",
+    "starlightrandom": "starlight_random",
+    "ripplerandom": "ripple_random",
 }
 
 
@@ -156,12 +125,45 @@ def read_effect(device):
     return EFFECT_ALIASES.get(raw.lower(), raw)
 
 
-def read_color(device):
-    entry = _state.get(device.serial)
-    color = entry.get("color") if entry else None
-    if isinstance(color, list) and len(color) == 3:
-        return [int(c) for c in color]
-    return None
+def read_colors(device):
+    """Live effect colours from the daemon.
+
+    getEffectColors() returns 9 bytes: three RGB triples, for the effects that
+    take one, two, or three colours. This is authoritative for everything this
+    plugin sets, because a static apply calls fx.static() before painting the
+    custom frame -- so the daemon holds the real colour even though a custom
+    frame on its own would not update it.
+    """
+    try:
+        raw = list(bytes(device.fx.colors))
+    except Exception:
+        return None, None
+    primary = [int(c) for c in raw[0:3]] if len(raw) >= 3 else None
+    secondary = [int(c) for c in raw[3:6]] if len(raw) >= 6 else None
+    return primary, secondary
+
+
+def read_battery(device):
+    """Charge level for wireless devices; None for wired ones.
+
+    battery_level exists on every device class but raises NotImplementedError
+    on wired hardware, and the daemon reports -1 when it has no reading.
+    """
+    try:
+        level = device.battery_level
+    except Exception:
+        return None
+    try:
+        level = int(round(float(level)))
+    except (TypeError, ValueError):
+        return None
+    if level < 0:
+        return None
+    try:
+        charging = bool(device.is_charging)
+    except Exception:
+        charging = False
+    return {"level": max(0, min(100, level)), "charging": charging}
 
 
 def apply_static(device, r, g, b):
@@ -197,12 +199,37 @@ def supported(device):
     return names
 
 
+def color_slots(device):
+    """How many colours each supported effect consumes, for the UI."""
+    out = {}
+    for name, capability, count in EFFECTS:
+        try:
+            if device.has(capability):
+                out[name] = count
+        except Exception:
+            pass
+    return out
+
+
 def read_dpi(device):
     try:
         x, y = device.dpi
-        return {"x": int(x), "y": int(y), "max": int(device.max_dpi)}
     except Exception:
         return None
+    info = {"x": int(x), "y": int(y)}
+    try:
+        info["max"] = int(device.max_dpi)
+    except Exception:
+        info["max"] = None
+    # Mice with discrete DPI steps advertise them. Reported so the UI can snap
+    # the slider instead of sending a value the daemon will silently move.
+    try:
+        available = [int(v) for v in device.available_dpi]
+        if available:
+            info["available"] = sorted(available)
+    except Exception:
+        pass
+    return info
 
 
 def read_stages(device):
@@ -227,19 +254,20 @@ def read_poll(device):
 
 
 def cmd_list():
-    # Cheap re-read: the file is tiny, and a long-lived serve process would
-    # otherwise never see state written by a one-shot invocation.
-    load_state()
     out = []
     for device in devices():
+        primary, secondary = read_colors(device)
         out.append({
             "serial": device.serial,
             "name": device.name,
             "type": device.type,
             "brightness": read_brightness(device),
             "effect": read_effect(device),
-            "color": read_color(device),
+            "color": primary,
+            "color2": secondary,
             "effects": supported(device),
+            "colorSlots": color_slots(device),
+            "battery": read_battery(device),
             "dpi": read_dpi(device),
             "dpiStages": read_stages(device),
             "poll": read_poll(device),
@@ -260,11 +288,21 @@ def cmd_brightness(serial, raw):
     return {"serial": serial, "brightness": read_brightness(device)}
 
 
+def triple(values, offset, label):
+    chunk = values[offset:offset + 3]
+    if len(chunk) < 3:
+        fail("effect needs %s r g b" % label)
+    try:
+        return tuple(max(0, min(255, int(c))) for c in chunk)
+    except (ValueError, TypeError):
+        fail("effect needs %s r g b as numbers" % label)
+
+
 def cmd_effect(serial, name, rgb):
     entry = next((e for e in EFFECTS if e[0] == name), None)
     if entry is None:
         fail("unknown effect %s" % name)
-    _, capability, takes_color = entry
+    _, capability, slots = entry
 
     device = find(serial)
     try:
@@ -276,45 +314,54 @@ def cmd_effect(serial, name, rgb):
         pass
 
     r = g = b = 0
-    if takes_color:
-        try:
-            r, g, b = (max(0, min(255, int(c))) for c in rgb)
-        except (ValueError, TypeError):
-            fail("effect %s needs an r g b triple" % name)
+    r2 = g2 = b2 = 0
+    if slots >= 1:
+        r, g, b = triple(rgb, 0, "a")
+    if slots >= 2:
+        r2, g2, b2 = triple(rgb, 3, "a second")
 
     fx = device.fx
-    used_custom = False
     try:
         if name == "spectrum":
             fx.spectrum()
         elif name == "static":
             # Both, in this order, and each is load-bearing:
             #   fx.static() tells the daemon what the device is doing, so
-            #     fx.effect reads back correctly and persistence.conf records
-            #     "static" plus the colour -- restore_persistence then brings
-            #     the right thing back at boot.
+            #     fx.effect and fx.colors read back correctly and
+            #     persistence.conf records "static" plus the colour --
+            #     restore_persistence then brings the right thing back at boot.
             #   the custom frame lands instantly, overriding the ~1.5s
             #     firmware crossfade that a named effect triggers.
             fx.static(r, g, b)
-            used_custom = apply_static(device, r, g, b)
+            apply_static(device, r, g, b)
         elif name == "breath":
             fx.breath_single(r, g, b)
+        elif name == "breath_dual":
+            fx.breath_dual(r, g, b, r2, g2, b2)
+        elif name == "breath_random":
+            fx.breath_random()
         elif name == "wave":
             fx.wave(1)
         elif name == "reactive":
             fx.reactive(r, g, b, 2)
+        elif name == "ripple":
+            fx.ripple(r, g, b, 0.05)
+        elif name == "ripple_random":
+            fx.ripple_random(0.05)
         elif name == "starlight":
             fx.starlight_single(r, g, b, 2)
+        elif name == "starlight_dual":
+            fx.starlight_dual(r, g, b, r2, g2, b2, 2)
+        elif name == "starlight_random":
+            fx.starlight_random(2)
         elif name == "none":
             fx.none()
     except Exception as exc:
         fail("could not apply %s: %s" % (name, exc))
 
-    # The colour is still worth keeping: openrazer exposes the active effect but
-    # not the colour it was given, and the wheel wants to reopen where it was.
-    remember(serial, name, (r, g, b) if takes_color else None)
-
-    return {"serial": serial, "effect": read_effect(device)}
+    primary, secondary = read_colors(device)
+    return {"serial": serial, "effect": read_effect(device),
+            "color": primary, "color2": secondary}
 
 
 def cmd_dpi(serial, raw):
@@ -327,7 +374,19 @@ def cmd_dpi(serial, raw):
         top = int(device.max_dpi)
     except Exception:
         fail("%s does not support DPI control" % device.name)
-    value = max(100, min(top, value))
+    # Refuse a step the device did not advertise, for the same reason as the
+    # poll-rate guard below: openrazer accepts it and quietly moves to a
+    # neighbouring value, which reads as the control being broken. The UI snaps
+    # the slider to these, so a refusal here means something else sent it.
+    try:
+        available = [int(v) for v in device.available_dpi]
+    except Exception:
+        available = []
+    if available:
+        if value not in available:
+            fail("%s supports %s DPI, not %d" % (device.name, sorted(available), value))
+    else:
+        value = max(100, min(top, value))
     try:
         device.dpi = (value, value)
     except Exception as exc:
@@ -370,8 +429,8 @@ def dispatch(argv):
         return cmd_brightness(args[0], args[1])
     if command == "effect":
         if len(args) < 2:
-            fail("usage: effect <serial> <name> [r g b]")
-        return cmd_effect(args[0], args[1], args[2:5])
+            fail("usage: effect <serial> <name> [r g b [r2 g2 b2]]")
+        return cmd_effect(args[0], args[1], args[2:8])
     if command == "dpi":
         if len(args) != 2:
             fail("usage: dpi <serial> <value>")
@@ -414,7 +473,6 @@ def serve():
 
 
 def main():
-    load_state()
     if len(sys.argv) < 2:
         print(json.dumps({"ok": False, "error": "usage: razerctl.py serve|list|..."}))
         sys.exit(1)

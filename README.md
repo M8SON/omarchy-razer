@@ -43,7 +43,6 @@ systemctl --user disable --now openrazer-daemon
 sudo gpasswd -d "$USER" openrazer      # log out and back in to take effect
 sed -i 's/^restore_persistence.*/restore_persistence = False/' \
   ~/.config/openrazer/razer.conf
-rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-razer"
 omarchy pkg drop openrazer-daemon python-openrazer
 ```
 
@@ -54,16 +53,21 @@ is harmless if you use any other Razer tool.
 
 - **Left-click** the bar icon to open the panel
 - **Middle-click** to force a refresh
-- Brightness slider, effect grid, and — for the effects that take a colour
-  (static, breath, reactive, starlight) — a full HSV **colour wheel**: hue
-  around the circumference, saturation centre-to-edge, a value slider beneath,
-  and a live hex readout
+- Brightness slider and an effect grid offering every effect the device
+  advertises — spectrum, static, breath (single, dual, random), wave, reactive,
+  ripple (single, random), and starlight (single, dual, random)
+- For the effects that take a colour, a full HSV **colour wheel**: hue around
+  the circumference, saturation centre-to-edge, a value slider beneath, and a
+  live hex readout. The dual effects take two colours; a **Colour 1 / Colour 2**
+  row picks which one the wheel is editing, and both swatches stay visible
+- **Battery** percentage, and whether it is charging, for wireless devices
 - `r` refreshes, `o` turns lighting off, `Esc` closes
 
 A device appears if *anything* about it is controllable. RGB keyboards and mice
 get the lighting controls; a mouse gets **Sensitivity** (DPI slider plus the
 device's own stage presets) and **Polling rate** (only the rates the device
-actually advertises). A wired DeathAdder V3 reports zero lighting capabilities
+actually advertises). On mice that expose a fixed set of DPI steps rather than a
+continuous range, the slider snaps to those steps. A wired DeathAdder V3 reports zero lighting capabilities
 but full DPI and poll-rate ones, so it shows the performance controls alone.
 
 When more than one device is controllable, a switcher row appears under the
@@ -93,14 +97,13 @@ that property itself when the child exits, and an imperative write from C++
 destroys a QML binding permanently — so `running: someFlag` works exactly once,
 after which the helper can never be restarted and every command queues forever.
 
-What the plugin last applied is persisted to
-`$XDG_STATE_HOME/omarchy-razer/state.json`, because `device.fx.effect` is
-client-side bookkeeping that a custom-frame draw never updates: after painting
-one it still reports whichever *named* effect preceded it. The file records that
-effect plus the `fx.effect` value seen at draw time; while the live value still
-matches, the custom frame is what is on screen, and the moment it differs
-another client has set an effect and the live value wins. The stored colour also
-lets the wheel reopen on the colour the device is actually showing.
+**The helper writes no files.** Effect and colour are both read live from the
+daemon — `fx.effect` and `fx.colors`, the latter returning nine bytes for the
+three colour slots. That is only trustworthy because a static apply sets the
+named effect *before* painting the custom frame (see below), so the daemon's
+bookkeeping stays correct even though a custom-frame draw never updates it on
+its own. Reading live also means a colour set from polychromatic or razer-cli
+shows up here, which a local cache could never see.
 
 **Static calls `fx.static()` *and then* paints a per-key custom frame.** Both
 matter. Setting a named effect makes at least the Huntsman V3 Pro Mini
@@ -138,8 +141,12 @@ Raw sysfs is deliberately **not** used, for reasons worth writing down:
   multi-zone hardware; patches welcome, ideally with the device name.
 - **Only `static` escapes the firmware crossfade.** The animated effects are run
   by the device, so switching *into* one still ramps.
-- **Effect parameters are fixed.** Wave direction, and the reactive/starlight
-  response time, use sensible defaults rather than being exposed as controls.
+- **Effect parameters are fixed.** Wave direction, ripple refresh rate, and the
+  reactive/starlight response time use sensible defaults rather than being
+  exposed as controls.
+- **`breath_triple` and `wheel` are not offered.** Three colour pickers is more
+  UI than a triple-breath earns, and `wheel` is a wheel-zone effect that belongs
+  with per-zone support, which is not built yet.
 - Setting a poll rate the device did not advertise is refused rather than sent,
   because OpenRazer accepts it and silently clamps — which reads as a broken
   control.

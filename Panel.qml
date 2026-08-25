@@ -32,6 +32,15 @@ Panel {
   property real satValue: 1.0
   property real valValue: 1.0
   readonly property color chosenColor: Qt.hsva(hueValue, satValue, valValue, 1)
+
+  // The dual effects (breath_dual, starlight_dual) take a second colour. One
+  // wheel edits whichever slot is selected rather than stacking two of them.
+  property real hue2Value: 0.5
+  property real sat2Value: 1.0
+  property real val2Value: 1.0
+  property int activeColorSlot: 0
+  readonly property color chosenColor2: Qt.hsva(hue2Value, sat2Value, val2Value, 1)
+  readonly property bool editingSecond: activeColorSlot === 1 && effectTakesTwoColors
   // Slider position while dragging, so the UI stays smooth even though every
   // apply is a subprocess round-trip. -1 means "use the device's value".
   property real pendingBrightness: -1
@@ -83,7 +92,8 @@ Panel {
   readonly property bool hasBrightness: hasLighting && current.brightness !== null && current.brightness !== undefined
   readonly property real brightnessValue: pendingBrightness >= 0 ? pendingBrightness : (hasBrightness ? current.brightness : 0)
   readonly property string currentEffect: current ? String(current.effect || "") : ""
-  readonly property bool effectTakesColor: hasLighting && colorEffects.indexOf(currentEffect) !== -1
+  readonly property bool effectTakesColor: hasLighting && slotsFor(currentEffect) >= 1
+  readonly property bool effectTakesTwoColors: hasLighting && slotsFor(currentEffect) >= 2
   readonly property bool anyLight: hasLighting && (hasBrightness ? brightnessValue > 0 && currentEffect !== "none" : currentEffect !== "none")
 
   readonly property var dpiInfo: current && current.dpi ? current.dpi : null
@@ -92,16 +102,39 @@ Panel {
   readonly property bool hasPerformance: dpiInfo !== null || pollInfo !== null
   readonly property real dpiValue: pendingDpi >= 0 ? pendingDpi : (dpiInfo ? dpiInfo.x : 0)
 
-  readonly property var colorEffects: ["static", "breath", "reactive", "starlight"]
+  // How many colours each effect consumes, reported per device by the helper
+  // so the UI never offers a wheel for an effect the firmware runs on its own.
+  readonly property var colorSlots: current && current.colorSlots ? current.colorSlots : ({})
+  readonly property var effectOrder: [
+    "spectrum", "static", "breath", "breath_dual", "breath_random",
+    "wave", "reactive", "ripple", "ripple_random",
+    "starlight", "starlight_dual", "starlight_random", "none"
+  ]
   readonly property var effectLabels: ({
     "spectrum": "Spectrum",
     "static": "Static",
     "breath": "Breath",
+    "breath_dual": "Breath 2",
+    "breath_random": "Breath ✻",
     "wave": "Wave",
     "reactive": "Reactive",
+    "ripple": "Ripple",
+    "ripple_random": "Ripple ✻",
     "starlight": "Starlight",
+    "starlight_dual": "Star 2",
+    "starlight_random": "Star ✻",
     "none": "Off"
   })
+
+  // Battery is reported only by wireless hardware; wired devices send null.
+  readonly property var batteryInfo: current && current.battery ? current.battery : null
+  readonly property string batteryText: batteryInfo
+    ? "Battery " + batteryInfo.level + "%" + (batteryInfo.charging ? " charging" : "")
+    : ""
+
+  // Mice with discrete DPI steps advertise them; the slider snaps so the
+  // helper is never sent a value the daemon would quietly move.
+  readonly property var dpiAvailable: dpiInfo && dpiInfo.available ? dpiInfo.available : []
 
   // The helper is held open rather than spawned per command. Importing
   // openrazer costs ~92ms while the D-Bus write costs ~4ms, so a process per
@@ -152,19 +185,23 @@ Panel {
 
   function applyEffect(name) {
     if (!current || helperPath === "") return
+    var slots = slotsFor(name)
+    if (slots < 2 && activeColorSlot !== 0) activeColorSlot = 0
     var args = ["effect", current.serial, name]
-    if (colorEffects.indexOf(name) !== -1) {
-      var c = chosenColor
-      args.push(String(Math.round(c.r * 255)))
-      args.push(String(Math.round(c.g * 255)))
-      args.push(String(Math.round(c.b * 255)))
-    }
+    if (slots >= 1) pushColor(args, chosenColor)
+    if (slots >= 2) pushColor(args, chosenColor2)
     runAction(args)
+  }
+
+  function pushColor(args, c) {
+    args.push(String(Math.round(c.r * 255)))
+    args.push(String(Math.round(c.g * 255)))
+    args.push(String(Math.round(c.b * 255)))
   }
 
   function applyDpi(value) {
     if (!current || !dpiInfo || helperPath === "") return
-    runAction(["dpi", current.serial, String(Math.round(value))])
+    runAction(["dpi", current.serial, String(snapDpi(value))])
   }
 
   function applyPollRate(hz) {
@@ -228,6 +265,13 @@ Panel {
     if (c.hsvHue >= 0) hueValue = c.hsvHue      // -1 for greys, which carry no hue
     satValue = c.hsvSaturation
     valValue = c.hsvValue
+    // The daemon reports three triples; the second one seeds the dual effects.
+    if (current.color2 && current.color2.length === 3) {
+      var d = Qt.rgba(current.color2[0] / 255, current.color2[1] / 255, current.color2[2] / 255, 1)
+      if (d.hsvHue >= 0) hue2Value = d.hsvHue
+      sat2Value = d.hsvSaturation
+      val2Value = d.hsvValue
+    }
     colorSeeded = true
   }
 
@@ -241,6 +285,21 @@ Panel {
 
   function supports(name) {
     return current !== null && current.effects.indexOf(name) !== -1
+  }
+
+  function slotsFor(name) {
+    var slots = colorSlots[name]
+    return slots === undefined ? 0 : slots
+  }
+
+  // Nearest advertised step, for devices that only accept a fixed set.
+  function snapDpi(value) {
+    if (dpiAvailable.length === 0) return Math.round(value)
+    var best = dpiAvailable[0]
+    for (var i = 1; i < dpiAvailable.length; i++) {
+      if (Math.abs(dpiAvailable[i] - value) < Math.abs(best - value)) best = dpiAvailable[i]
+    }
+    return best
   }
 
   function applyDevices(list) {
@@ -428,15 +487,18 @@ Panel {
             meta: {
               if (root.errorText !== "") return root.errorText
               if (root.current === null) return root.loading ? "Looking for devices…" : "No Razer devices found"
+              var bits = []
               if (!root.hasLighting) {
                 // A mouse with no RGB still has something worth summarising.
-                var bits = []
                 if (root.dpiInfo) bits.push(Math.round(root.dpiValue) + " DPI")
                 if (root.pollInfo) bits.push(root.pollInfo.current + " Hz")
-                return bits.length > 0 ? bits.join(" · ") : "No lighting on this device"
+                if (bits.length === 0 && !root.batteryInfo) return "No lighting on this device"
+              } else {
+                bits.push(root.effectLabels[root.currentEffect] || root.currentEffect)
+                if (root.hasBrightness) bits.push(Math.round(root.brightnessValue) + "%")
               }
-              var label = root.effectLabels[root.currentEffect] || root.currentEffect
-              return root.hasBrightness ? label + " · " + Math.round(root.brightnessValue) + "%" : label
+              if (root.batteryInfo) bits.push(root.batteryText)
+              return bits.join(" · ")
             }
             foreground: root.foreground
             fontFamily: root.fontFamily
@@ -531,7 +593,7 @@ Panel {
               spacing: Style.spacing.controlGap
 
               Repeater {
-                model: ["spectrum", "static", "breath", "wave", "reactive", "starlight", "none"]
+                model: root.effectOrder
                 Button {
                   required property var modelData
                   visible: root.supports(modelData)
@@ -560,16 +622,41 @@ Panel {
               fontFamily: root.fontFamily
             }
 
+            // Which colour the wheel edits. Only the dual effects have two.
+            Row {
+              width: parent.width
+              spacing: Style.spacing.controlGap
+              visible: root.effectTakesTwoColors
+
+              Repeater {
+                model: [0, 1]
+                Button {
+                  required property var modelData
+                  text: modelData === 0 ? "Colour 1" : "Colour 2"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  fontSize: Style.font.caption
+                  selected: root.activeColorSlot === modelData
+                  onClicked: root.activeColorSlot = modelData
+                }
+              }
+            }
+
             ColorWheel {
               id: wheel
               anchors.horizontalCenter: parent.horizontalCenter
-              hue: root.hueValue
-              saturation: root.satValue
-              value: root.valValue
+              hue: root.editingSecond ? root.hue2Value : root.hueValue
+              saturation: root.editingSecond ? root.sat2Value : root.satValue
+              value: root.editingSecond ? root.val2Value : root.valValue
               foreground: root.foreground
               onMoved: function(h, s) {
-                root.hueValue = h
-                root.satValue = s
+                if (root.editingSecond) {
+                  root.hue2Value = h
+                  root.sat2Value = s
+                } else {
+                  root.hueValue = h
+                  root.satValue = s
+                }
                 colorTimer.restart()
               }
               onCommitted: {
@@ -584,13 +671,15 @@ Panel {
               minimum: 0
               maximum: 1
               step: 0.01
-              value: root.valValue
+              value: root.editingSecond ? root.val2Value : root.valValue
               onMoved: function(v) {
-                root.valValue = v
+                if (root.editingSecond) root.val2Value = v
+                else root.valValue = v
                 colorTimer.restart()
               }
               onReleased: function(v) {
-                root.valValue = v
+                if (root.editingSecond) root.val2Value = v
+                else root.valValue = v
                 colorTimer.stop()
                 root.commitColor()
               }
@@ -605,13 +694,26 @@ Panel {
                 height: Style.space(16)
                 radius: Style.space(3)
                 color: root.chosenColor
-                border.width: 1
-                border.color: Qt.darker(root.foreground, 1.8)
+                border.width: root.effectTakesTwoColors && root.activeColorSlot === 0 ? 2 : 1
+                border.color: root.effectTakesTwoColors && root.activeColorSlot === 0
+                  ? root.foreground : Qt.darker(root.foreground, 1.8)
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Rectangle {
+                visible: root.effectTakesTwoColors
+                width: Style.space(16)
+                height: Style.space(16)
+                radius: Style.space(3)
+                color: root.chosenColor2
+                border.width: root.activeColorSlot === 1 ? 2 : 1
+                border.color: root.activeColorSlot === 1
+                  ? root.foreground : Qt.darker(root.foreground, 1.8)
                 anchors.verticalCenter: parent.verticalCenter
               }
 
               Text {
-                text: root.hexOf(root.chosenColor)
+                text: root.hexOf(root.editingSecond ? root.chosenColor2 : root.chosenColor)
                 color: Qt.darker(root.foreground, 1.4)
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
@@ -644,11 +746,11 @@ Panel {
               integer: true
               value: root.dpiValue
               onMoved: function(v) {
-                root.pendingDpi = v
+                root.pendingDpi = root.snapDpi(v)
                 dpiTimer.restart()
               }
               onReleased: function(v) {
-                root.pendingDpi = v
+                root.pendingDpi = root.snapDpi(v)
                 dpiTimer.stop()
                 root.applyDpi(v)
               }
