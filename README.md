@@ -146,6 +146,7 @@ Raw sysfs is deliberately **not** used, for reasons worth writing down:
 
 - Omarchy 4.x (Quattro shell)
 - `openrazer-daemon` and `python-openrazer`
+- `python3` on `PATH` (the widget runs the bundled `razerctl.py` helper with it)
 - Membership in the `openrazer` group
 
 ## Notes for other plugin authors
