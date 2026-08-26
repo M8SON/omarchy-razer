@@ -53,6 +53,10 @@ Panel {
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.55)
+  // The theme's accent. Everything else here is foreground or a darkened
+  // foreground, which follows the theme but never shows its colour -- the
+  // accent is what makes a theme switch actually read as one.
+  readonly property color accent: Color.accent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   readonly property int refreshIntervalSec: Math.max(5, Math.min(600, setting("refreshIntervalSec", 30)))
@@ -696,7 +700,7 @@ Panel {
                 color: root.chosenColor
                 border.width: root.effectTakesTwoColors && root.activeColorSlot === 0 ? 2 : 1
                 border.color: root.effectTakesTwoColors && root.activeColorSlot === 0
-                  ? root.foreground : Qt.darker(root.foreground, 1.8)
+                  ? root.accent : Qt.darker(root.foreground, 1.8)
                 anchors.verticalCenter: parent.verticalCenter
               }
 
@@ -708,13 +712,13 @@ Panel {
                 color: root.chosenColor2
                 border.width: root.activeColorSlot === 1 ? 2 : 1
                 border.color: root.activeColorSlot === 1
-                  ? root.foreground : Qt.darker(root.foreground, 1.8)
+                  ? root.accent : Qt.darker(root.foreground, 1.8)
                 anchors.verticalCenter: parent.verticalCenter
               }
 
               Text {
                 text: root.hexOf(root.editingSecond ? root.chosenColor2 : root.chosenColor)
-                color: Qt.darker(root.foreground, 1.4)
+                color: root.accent
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
                 anchors.verticalCenter: parent.verticalCenter
