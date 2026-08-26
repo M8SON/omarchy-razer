@@ -534,7 +534,12 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(320))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(560))
+    // 560 was enough before the theme swatch row and the six extra effects
+    // added two more rows -- past that the colour wheel clipped and the value
+    // slider and hex readout fell below the fold. fittedContentHeight still
+    // clamps to what the screen actually offers, so this is a ceiling, not a
+    // demand: a short screen scrolls as before.
+    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(760))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -703,7 +708,9 @@ Panel {
 
             PanelSectionHeader {
               width: parent.width
-              text: "Colour"
+              // Same idiom as "Sensitivity · 800 DPI" below, and it buys back
+              // the row the readout used to occupy on its own.
+              text: "Colour · " + root.hexOf(root.editingSecond ? root.chosenColor2 : root.chosenColor)
               foreground: root.foreground
               fontFamily: root.fontFamily
             }
@@ -800,6 +807,7 @@ Panel {
             Row {
               width: parent.width
               spacing: Style.spacing.controlGap
+              visible: root.effectTakesTwoColors
 
               Rectangle {
                 width: Style.space(16)
@@ -824,13 +832,6 @@ Panel {
                 anchors.verticalCenter: parent.verticalCenter
               }
 
-              Text {
-                text: root.hexOf(root.editingSecond ? root.chosenColor2 : root.chosenColor)
-                color: root.accent
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                anchors.verticalCenter: parent.verticalCenter
-              }
             }
           }
 
