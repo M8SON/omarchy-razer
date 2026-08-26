@@ -60,6 +60,11 @@ is harmless if you use any other Razer tool.
   the circumference, saturation centre-to-edge, a value slider beneath, and a
   live hex readout. The dual effects take two colours; a **Colour 1 / Colour 2**
   row picks which one the wheel is editing, and both swatches stay visible
+- A **theme palette** row above the wheel, filled from the Omarchy theme you
+  are actually running — accent, red, orange, yellow, green, cyan, blue,
+  magenta, foreground. Click one to put that colour on the keyboard. Switch
+  theme and the row refills itself, so the lighting can follow the desktop
+  without leaving the panel
 - **Battery** percentage, and whether it is charging, for wireless devices
 - `r` refreshes, `o` turns lighting off, `Esc` closes
 
@@ -116,6 +121,24 @@ daemon's bookkeeping correct, so `persistence.conf` records `static` plus the
 colour and the right thing comes back after a reboot. Devices without per-key
 matrix support simply get the named effect. The animated effects stay as named
 effects, since the firmware is what runs them.
+
+**The theme palette re-reads on a theme switch, the long way round.**
+`~/.local/state/omarchy/current/theme` is a symlink that *retargets* when the
+theme changes, and Omarchy's own `Color` singleton deliberately does not watch
+the `colors.toml` behind it — runtime switches are pushed to the shell over IPC
+instead. Watching the path is therefore unreliable. The panel instead watches
+the shell's own resolved colours (`Color.accent`, `foreground`, `background`)
+and re-reads the file whenever they move, with `watchChanges` kept as a second
+path for an in-place edit. `Color` only exposes
+foreground/background/accent/urgent/muted, which is why the file is parsed
+directly for the named palette.
+
+The panel's own chrome needs none of this: it takes every colour from `Color.*`
+or the bar and carries no hardcoded values, so it re-themes on its own. The
+accent is used for the hex readout and the active colour-slot ring — enough for
+a theme switch to read as one. Selected-state styling is left to the shared
+`Ui` components, which resolve it through the theme's own selected-colour
+token; hardcoding an accent there would override a theme that chose otherwise.
 
 Raw sysfs is deliberately **not** used, for reasons worth writing down:
 
