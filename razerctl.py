@@ -16,7 +16,7 @@ see.
 
 Two modes:
 
-  one-shot   razerctl.py list | brightness | effect | dpi | pollrate ...
+  one-shot   razerctl.py list | brightness | effect | dpi | pollrate | theme ...
   serve      razerctl.py serve
 
 `serve` reads one JSON argv array per line on stdin and writes one JSON object
@@ -364,6 +364,43 @@ def cmd_effect(serial, name, rgb):
             "color": primary, "color2": secondary}
 
 
+def cmd_theme(raw):
+    """Put one colour on every device that can hold a static effect.
+
+    Used by the theme-set hook. Devices that cannot do static -- a wired
+    DeathAdder V3 reports no lighting at all -- are reported as skipped rather
+    than treated as a failure, because "no Razer lighting here" is a normal
+    outcome for a hook that runs on every theme change.
+    """
+    text = str(raw).lstrip("#").strip()
+    if len(text) != 6:
+        fail("theme colour must be 6 hex digits")
+    try:
+        r, g, b = (int(text[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        fail("theme colour must be 6 hex digits")
+
+    applied, skipped = [], []
+    for device in devices():
+        try:
+            usable = device.has("lighting_static")
+        except Exception:
+            usable = False
+        if not usable:
+            skipped.append(device.name)
+            continue
+        try:
+            # Same order as cmd_effect: the named effect keeps the daemon's
+            # bookkeeping and persistence right, the custom frame lands without
+            # the firmware crossfade.
+            device.fx.static(r, g, b)
+            apply_static(device, r, g, b)
+            applied.append(device.name)
+        except Exception:
+            skipped.append(device.name)
+    return {"color": [r, g, b], "applied": applied, "skipped": skipped}
+
+
 def cmd_dpi(serial, raw):
     try:
         value = int(float(raw))
@@ -431,6 +468,10 @@ def dispatch(argv):
         if len(args) < 2:
             fail("usage: effect <serial> <name> [r g b [r2 g2 b2]]")
         return cmd_effect(args[0], args[1], args[2:8])
+    if command == "theme":
+        if len(args) != 1:
+            fail("usage: theme <rrggbb>")
+        return cmd_theme(args[0])
     if command == "dpi":
         if len(args) != 2:
             fail("usage: dpi <serial> <value>")

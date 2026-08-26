@@ -30,6 +30,7 @@ sets `restore_persistence = True`. Skip it only if OpenRazer already works.
 ## Uninstall
 
 ```bash
+rm -f ~/.config/omarchy/hooks/theme-set.d/razer   # if you linked the hook
 omarchy plugin disable daedalus.razer
 omarchy plugin remove daedalus.razer
 ```
@@ -77,6 +78,31 @@ but full DPI and poll-rate ones, so it shows the performance controls alone.
 
 When more than one device is controllable, a switcher row appears under the
 title.
+
+## Follow the theme automatically
+
+The swatch row makes matching the Omarchy theme one click. To make it zero
+clicks, link the bundled hook so the colour is reapplied whenever the theme
+changes:
+
+```bash
+ln -sf ~/.config/omarchy/plugins/daedalus.razer/theme-hook.sh \
+       ~/.config/omarchy/hooks/theme-set.d/razer
+```
+
+Delete that link to turn it off again. It needs no executable bit — Omarchy
+runs everything in `theme-set.d` through `bash`.
+
+The hook prefers the theme's own `keyboard.rgb`, which is the colour the theme
+author picked for hardware and is not always the accent, and falls back to
+`accent` from `colors.toml`. Omarchy has shipped `keyboard.rgb` and an
+`omarchy-theme-set-keyboard` dispatcher for a while, but only for ASUS ROG and
+F16 hardware — nothing consumed it for Razer, which is what this fills in.
+
+It is deliberately quiet: no theme colour, no valid colour, or no Razer
+lighting present all exit 0 without touching anything, because a hook that runs
+on every theme change must never make the switch fail. A wired DeathAdder V3
+reports no lighting at all and is simply skipped.
 
 ## Settings
 
