@@ -20,17 +20,28 @@ PLUGIN_DIR="$HOME/.config/omarchy/plugins/daedalus.razer"
 
 color=""
 
+# Theme files sit at replaceable paths, and this hook runs inside every theme
+# switch, so a read that follows a symlink, streams a huge file, or blocks on
+# a FIFO would hang or slow the switch itself. Refuse symlinks and anything
+# not a regular file, and never read more than 64 KiB. (Bash cannot fstat an
+# already-open descriptor, so a check-then-read race window remains; head -c
+# still bounds the bytes either way, and the panel's own read is fully
+# descriptor-bound in razerctl.py.)
+read_small() {
+  [[ ! -L $1 && -f $1 ]] || return 1
+  head -c 65536 -- "$1" 2>/dev/null
+}
+
 # A theme may ship an explicit keyboard colour. Prefer it: it is the value the
 # theme author chose for hardware, which is not always the accent.
-if [[ -f $THEME_DIR/keyboard.rgb ]]; then
-  color=$(tr -d '#[:space:]' <"$THEME_DIR/keyboard.rgb")
-fi
+color=$(read_small "$THEME_DIR/keyboard.rgb" | tr -d '#[:space:]')
 
 # Otherwise fall back to the accent, which is what the panel's swatch row
 # leads with, so the hook and the UI agree on what "the theme colour" means.
-if [[ ! $color =~ ^[0-9A-Fa-f]{6}$ && -f $THEME_DIR/colors.toml ]]; then
-  color=$(sed -n 's/^accent[[:space:]]*=[[:space:]]*"#\([0-9A-Fa-f]\{6\}\)".*/\1/p' \
-    "$THEME_DIR/colors.toml" | head -1)
+if [[ ! $color =~ ^[0-9A-Fa-f]{6}$ ]]; then
+  color=$(read_small "$THEME_DIR/colors.toml" \
+    | sed -n 's/^accent[[:space:]]*=[[:space:]]*"#\([0-9A-Fa-f]\{6\}\)".*/\1/p' \
+    | head -1)
 fi
 
 [[ $color =~ ^[0-9A-Fa-f]{6}$ ]] || exit 0

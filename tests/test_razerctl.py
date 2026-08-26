@@ -142,6 +142,47 @@ check("and to a sane floor",
 check("a non-numeric value is refused",
       run_dpi(continuous, "fast"), "refused: dpi must be a number")
 
+# cmd_read_theme: the descriptor-bound read behind the panel's swatch row.
+# Every rejection returns empty text rather than raising -- a bad theme file
+# must cost the UI nothing but its swatches.
+import tempfile
+
+with tempfile.TemporaryDirectory() as td:
+    good = os.path.join(td, "colors.toml")
+    with open(good, "w") as fh:
+        fh.write('accent = "#aabbcc"\n')
+    check("a regular colors.toml is read back",
+          razerctl.cmd_read_theme(good)["themeText"], 'accent = "#aabbcc"\n')
+
+    check("a missing file reads as empty",
+          razerctl.cmd_read_theme(os.path.join(td, "absent", "colors.toml")),
+          {"themeText": ""})
+
+    check("a path not named colors.toml is refused",
+          razerctl.cmd_read_theme(os.path.join(td, "shadow")), {"themeText": ""})
+
+    big = os.path.join(td, "big")
+    os.mkdir(big)
+    bigfile = os.path.join(big, "colors.toml")
+    with open(bigfile, "wb") as fh:
+        fh.write(b"x" * (razerctl.MAX_THEME_BYTES + 1))
+    check("an oversized file is refused rather than truncated",
+          razerctl.cmd_read_theme(bigfile), {"themeText": ""})
+
+    linked = os.path.join(td, "linked")
+    os.mkdir(linked)
+    os.symlink(good, os.path.join(linked, "colors.toml"))
+    check("a symlinked colors.toml is refused",
+          razerctl.cmd_read_theme(os.path.join(linked, "colors.toml")),
+          {"themeText": ""})
+
+    fifod = os.path.join(td, "fifo")
+    os.mkdir(fifod)
+    fifo = os.path.join(fifod, "colors.toml")
+    os.mkfifo(fifo)
+    check("a FIFO neither blocks nor reads",
+          razerctl.cmd_read_theme(fifo), {"themeText": ""})
+
 print()
 if FAILURES:
     print("%d failing: %s" % (len(FAILURES), ", ".join(FAILURES)))

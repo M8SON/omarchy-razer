@@ -26,6 +26,8 @@ capped updates at ~9/sec. Held open, samples land in single-digit milliseconds.
 """
 
 import json
+import os
+import stat
 import sys
 
 # Effects we expose, in menu order: (name, gating capability, colours consumed).
@@ -463,6 +465,50 @@ def cmd_pollrate(serial, raw):
     return {"serial": serial, "poll": read_poll(device)}
 
 
+# The panel's swatch row wants the current theme's colors.toml, which sits at
+# a replaceable path under the user's config. Reading it directly from QML
+# (FileView) had no size, type, or symlink guard, so an oversized or special
+# file there could stall or exhaust the persistent shell process. This is the
+# guarded version: open the descriptor without following a final-component
+# symlink and without blocking (so a FIFO cannot hang the open), fstat the
+# descriptor itself -- not the path, which could be swapped between check and
+# read -- and refuse anything that is not a regular file within the cap.
+#
+# Failure here is never an error to the UI: a theme without colors.toml is
+# normal, and the only consequence of any rejection is an empty swatch row.
+MAX_THEME_BYTES = 64 * 1024
+
+
+def cmd_read_theme(path):
+    if os.path.basename(path) != "colors.toml":
+        return {"themeText": ""}
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return {"themeText": ""}
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_THEME_BYTES:
+            return {"themeText": ""}
+        # Regular files never block on read; drop O_NONBLOCK now that the type
+        # is proven so a slow filesystem cannot surface EAGAIN.
+        os.set_blocking(fd, True)
+        chunks = []
+        remaining = MAX_THEME_BYTES
+        while remaining > 0:
+            chunk = os.read(fd, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        data = b"".join(chunks)
+    except OSError:
+        return {"themeText": ""}
+    finally:
+        os.close(fd)
+    return {"themeText": data.decode("utf-8", "replace")}
+
+
 def dispatch(argv):
     if not argv:
         fail("empty command")
@@ -481,6 +527,10 @@ def dispatch(argv):
         if len(args) != 1:
             fail("usage: theme <rrggbb>")
         return cmd_theme(args[0])
+    if command == "readtheme":
+        if len(args) != 1:
+            fail("usage: readtheme <path to colors.toml>")
+        return cmd_read_theme(args[0])
     if command == "dpi":
         if len(args) != 2:
             fail("usage: dpi <serial> <value>")

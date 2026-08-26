@@ -255,6 +255,13 @@ Panel {
       return
     }
 
+    // A palette read is not a device action: it must not trigger the settle
+    // refresh below, and an empty result just means no swatches.
+    if (payload.cmd === "readtheme") {
+      parseTheme(payload.themeText || "")
+      return
+    }
+
     // The daemon restores persisted state asynchronously and can land after our
     // write, so read the truth back a beat later rather than trusting the echo.
     settleTimer.restart()
@@ -312,12 +319,24 @@ Panel {
   ]
 
   // Color loads colors.toml once at startup and has runtime theme switches
-  // pushed to it over shell IPC, so its own FileView deliberately does not
-  // watch. Piggyback on that instead of trying to watch a symlink that
-  // retargets: when the shell's own colours move, re-read the file.
+  // pushed to it over shell IPC, so when the shell's own colours move the
+  // theme has changed and the palette needs re-reading. The read itself goes
+  // through the razerctl helper rather than a FileView: colors.toml sits at a
+  // replaceable path, and FileView reads it with no size, type, or no-follow
+  // guard, so a planted oversized or special file could stall or exhaust the
+  // shell process. The helper does a descriptor-bound, bounded read instead
+  // (see cmd_read_theme). Swatches only render inside the panel, so the read
+  // happens on open and on a theme switch while open -- which also means the
+  // helper is never woken from idle just to read a palette. Trade-off: an
+  // in-place edit to colors.toml no longer triggers a live re-read (the old
+  // watchChanges nicety); reopening the panel picks it up.
   readonly property string themeSignature:
     String(Color.accent) + "|" + String(Color.foreground) + "|" + String(Color.background)
-  onThemeSignatureChanged: themeFile.reload()
+  onThemeSignatureChanged: if (opened) requestTheme()
+
+  function requestTheme() {
+    send(["readtheme", Color.currentThemePath + "/colors.toml"])
+  }
 
   function parseTheme(text) {
     var found = ({})
@@ -399,6 +418,7 @@ Panel {
       serverFailures = 0
       ensureServer()
       refresh()
+      requestTheme()
     } else {
       // Nothing needs the helper with the panel shut; the bar icon keeps
       // rendering from the last list. 32MB is not worth holding idle.
@@ -411,18 +431,6 @@ Panel {
   // C++ destroys a QML binding permanently -- so a `running: someFlag` binding
   // works exactly once, then the helper can never be started again and every
   // command silently queues forever.
-  // watchChanges catches an edit to the theme file in place; the signature
-  // binding above catches the far more common case, the theme being swapped
-  // for a different one.
-  FileView {
-    id: themeFile
-    path: Color.currentThemePath + "/colors.toml"
-    watchChanges: true
-    printErrors: false
-    onLoaded: root.parseTheme(text())
-    onFileChanged: reload()
-  }
-
   Process {
     id: server
     command: root.helperPath === "" ? [] : ["python3", root.helperPath, "serve"]
