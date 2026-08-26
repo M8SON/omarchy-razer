@@ -5,7 +5,10 @@ effects, and colour — without the polychromatic tray applet.
 
 ![kind](https://img.shields.io/badge/kind-bar--widget-blue) ![omarchy](https://img.shields.io/badge/omarchy-4.x-green)
 
-![The panel: device switcher, brightness, effect grid, and the HSV colour wheel](preview.png)
+![The same panel under two Omarchy themes: osaka-jade on the left with a single-colour Static effect, tokyo-night on the right with the two-colour Breath 2 effect. Chrome, accents and the theme swatch row all follow the active theme.](preview.png)
+
+The same panel under two Omarchy themes — the chrome, the accent, and the
+swatch row above the wheel all follow whichever theme you are running.
 
 ## Why
 
