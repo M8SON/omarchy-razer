@@ -325,15 +325,23 @@ def cmd_effect(serial, name, rgb):
         if name == "spectrum":
             fx.spectrum()
         elif name == "static":
-            # Both, in this order, and each is load-bearing:
-            #   fx.static() tells the daemon what the device is doing, so
-            #     fx.effect and fx.colors read back correctly and
-            #     persistence.conf records "static" plus the colour --
-            #     restore_persistence then brings the right thing back at boot.
-            #   the custom frame lands instantly, overriding the ~1.5s
-            #     firmware crossfade that a named effect triggers.
-            fx.static(r, g, b)
+            # Both, and the order is load-bearing -- frame FIRST, named effect
+            # LAST. It used to be the other way round, which left the number
+            # row stale on a Huntsman V3 Pro Mini: the custom frame does not
+            # address that row (the firmware keeps it for its own indicator),
+            # so whichever call lands last decides whether that row is right.
+            # A named effect reaches every key; the custom frame does not.
+            #
+            #   the custom frame lands instantly, so the drag has no lag
+            #   fx.static() then fixes the rows the frame cannot reach, tells
+            #     the daemon what the device is doing so fx.effect and
+            #     fx.colors read back correctly, and gets "static" plus the
+            #     colour into persistence.conf for restore_persistence.
+            #
+            # fx.static() costs ~1.3ms against ~7ms for the frame, so paying
+            # for both still sustains ~119 updates/sec.
             apply_static(device, r, g, b)
+            fx.static(r, g, b)
         elif name == "breath":
             fx.breath_single(r, g, b)
         elif name == "breath_dual":
@@ -390,11 +398,12 @@ def cmd_theme(raw):
             skipped.append(device.name)
             continue
         try:
-            # Same order as cmd_effect: the named effect keeps the daemon's
-            # bookkeeping and persistence right, the custom frame lands without
-            # the firmware crossfade.
-            device.fx.static(r, g, b)
+            # Same order as cmd_effect, and for the same reason: the frame
+            # first so it lands instantly, the named effect last so it reaches
+            # the rows the frame cannot address and leaves the daemon's
+            # bookkeeping and persistence correct.
             apply_static(device, r, g, b)
+            device.fx.static(r, g, b)
             applied.append(device.name)
         except Exception:
             skipped.append(device.name)

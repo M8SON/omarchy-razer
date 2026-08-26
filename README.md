@@ -136,17 +136,30 @@ bookkeeping stays correct even though a custom-frame draw never updates it on
 its own. Reading live also means a colour set from polychromatic or razer-cli
 shows up here, which a local cache could never see.
 
-**Static calls `fx.static()` *and then* paints a per-key custom frame.** Both
-matter. Setting a named effect makes at least the Huntsman V3 Pro Mini
-crossfade to the new colour over ~1.5 s, which feels broken on a colour wheel;
-the custom frame lands instantly and overrides that ramp. But a custom frame
-never updates `fx.effect`, so on its own it leaves the daemon believing the
-device is still running whatever effect preceded it — which `restore_persistence`
-then faithfully restores at the next boot. Calling `fx.static()` first keeps the
-daemon's bookkeeping correct, so `persistence.conf` records `static` plus the
-colour and the right thing comes back after a reboot. Devices without per-key
-matrix support simply get the named effect. The animated effects stay as named
-effects, since the firmware is what runs them.
+**Static paints a per-key custom frame *and then* calls `fx.static()`, in that
+order.** Both matter, and the order is the whole point.
+
+Setting a named effect makes at least the Huntsman V3 Pro Mini crossfade to the
+new colour over ~1.5 s, which feels broken on a colour wheel. A custom frame
+lands instantly, so it goes first.
+
+But **a custom frame does not address every key.** On the Huntsman V3 Pro Mini
+the number row is missing from it: the driver reports a 5×15 matrix, rows 1–4
+paint correctly, and row 0 never changes — the firmware appears to keep that row
+for its own indicator while in custom mode. A named effect reaches it fine, and
+so does `spectrum`. So whichever call lands *last* decides whether that row is
+right, and it has to be the named one.
+
+Calling `fx.static()` last also keeps the daemon's bookkeeping correct — a
+custom frame never updates `fx.effect` — so `persistence.conf` records `static`
+plus the colour, and `restore_persistence` brings the right thing back at boot
+rather than whatever effect preceded it.
+
+The cost is one extra D-Bus call per update: `fx.static()` measures ~1.3 ms
+against ~7 ms for the frame draw, so both together still sustain ~119
+updates/sec, well past the point where a colour wheel feels immediate. Devices
+without per-key matrix support simply get the named effect. The animated
+effects stay as named effects, since the firmware is what runs them.
 
 **The theme palette re-reads on a theme switch, the long way round.**
 `~/.local/state/omarchy/current/theme` is a symlink that *retargets* when the
@@ -190,6 +203,12 @@ Raw sysfs is deliberately **not** used, for reasons worth writing down:
   multi-zone hardware; patches welcome, ideally with the device name.
 - **Only `static` escapes the firmware crossfade.** The animated effects are run
   by the device, so switching *into* one still ramps.
+- **A custom frame cannot reach every key on every board.** The Huntsman V3 Pro
+  Mini's number row is outside the custom-frame matrix even though the driver
+  reports dimensions that appear to include it. Applying the named effect last
+  covers it, but a board that hides *more* than one row from the frame would
+  briefly show the frame's incomplete result before the named effect corrects
+  it. Reports with device names welcome.
 - **Effect parameters are fixed.** Wave direction, ripple refresh rate, and the
   reactive/starlight response time use sensible defaults rather than being
   exposed as controls.
