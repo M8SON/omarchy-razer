@@ -291,9 +291,74 @@ Panel {
     return current !== null && current.effects.indexOf(name) !== -1
   }
 
+  // Every OpenRazer device name starts with "Razer", which is ~40px of
+  // nothing in a tab strip. The hero title still shows the full name.
+  function shortName(name) {
+    return String(name || "").replace(/^Razer\s+/i, "")
+  }
+
   function slotsFor(name) {
     var slots = colorSlots[name]
     return slots === undefined ? 0 : slots
+  }
+
+  // The current Omarchy theme's palette, offered as one-click swatches so the
+  // keyboard can be set to a colour that is actually on screen. Color only
+  // exposes foreground/background/accent/urgent/muted, so read colors.toml.
+  property var themeColors: []
+
+  readonly property var themeKeys: [
+    "accent", "red", "orange", "yellow", "green", "cyan", "blue", "magenta", "foreground"
+  ]
+
+  // Color loads colors.toml once at startup and has runtime theme switches
+  // pushed to it over shell IPC, so its own FileView deliberately does not
+  // watch. Piggyback on that instead of trying to watch a symlink that
+  // retargets: when the shell's own colours move, re-read the file.
+  readonly property string themeSignature:
+    String(Color.accent) + "|" + String(Color.foreground) + "|" + String(Color.background)
+  onThemeSignatureChanged: themeFile.reload()
+
+  function parseTheme(text) {
+    var found = ({})
+    var lines = String(text || "").split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var m = lines[i].match(/^\s*([a-z_]+)\s*=\s*"(#[0-9a-fA-F]{6})"\s*$/)
+      if (m) found[m[1]] = m[2].toLowerCase()
+    }
+    // Fixed order, and deduplicated: several themes give accent and foreground
+    // the same value, and a row of identical swatches just looks broken.
+    var seen = ({})
+    var out = []
+    for (var j = 0; j < themeKeys.length; j++) {
+      var hex = found[themeKeys[j]]
+      if (hex && !seen[hex]) {
+        seen[hex] = true
+        out.push({ "name": themeKeys[j], "hex": hex })
+      }
+    }
+    themeColors = out
+  }
+
+  // Drive the wheel from a swatch, then apply it like any other colour edit.
+  function pickThemeColor(hex) {
+    // Build the colour the same way seedColor does. Qt.color() is not a
+    // dependable QML global; Qt.rgba() is.
+    var h = String(hex).replace("#", "")
+    var c = Qt.rgba(parseInt(h.substring(0, 2), 16) / 255,
+                    parseInt(h.substring(2, 4), 16) / 255,
+                    parseInt(h.substring(4, 6), 16) / 255, 1)
+    if (editingSecond) {
+      if (c.hsvHue >= 0) hue2Value = c.hsvHue   // -1 for greys, which keep the old hue
+      sat2Value = c.hsvSaturation
+      val2Value = c.hsvValue
+    } else {
+      if (c.hsvHue >= 0) hueValue = c.hsvHue
+      satValue = c.hsvSaturation
+      valValue = c.hsvValue
+    }
+    colorTimer.stop()
+    commitColor()
   }
 
   // Nearest advertised step, for devices that only accept a fixed set.
@@ -346,6 +411,18 @@ Panel {
   // C++ destroys a QML binding permanently -- so a `running: someFlag` binding
   // works exactly once, then the helper can never be started again and every
   // command silently queues forever.
+  // watchChanges catches an edit to the theme file in place; the signature
+  // binding above catches the far more common case, the theme being swapped
+  // for a different one.
+  FileView {
+    id: themeFile
+    path: Color.currentThemePath + "/colors.toml"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.parseTheme(text())
+    onFileChanged: reload()
+  }
+
   Process {
     id: server
     command: root.helperPath === "" ? [] : ["python3", root.helperPath, "serve"]
@@ -518,7 +595,12 @@ Panel {
           }
 
           // Device switcher, only worth showing when there is a choice.
-          Row {
+          //
+          // Flow, not Row: a Row lays its children out at their natural widths
+          // and simply overflows the panel, so with three or four devices the
+          // later tabs ran off the right edge and could not be clicked at all.
+          // Two long names already overflowed a 320-wide panel.
+          Flow {
             width: parent.width
             spacing: Style.spacing.controlGap
             visible: root.controlDevices.length > 1
@@ -527,7 +609,7 @@ Panel {
               model: root.controlDevices
               Button {
                 required property var modelData
-                text: modelData.name
+                text: root.shortName(modelData.name)
                 foreground: root.foreground
                 fontFamily: root.fontFamily
                 fontSize: Style.font.caption
@@ -642,6 +724,32 @@ Panel {
                   fontSize: Style.font.caption
                   selected: root.activeColorSlot === modelData
                   onClicked: root.activeColorSlot = modelData
+                }
+              }
+            }
+
+            // The current theme's palette. Refills itself on a theme switch.
+            Flow {
+              width: parent.width
+              spacing: Style.spacing.controlGap
+              visible: root.themeColors.length > 0
+
+              Repeater {
+                model: root.themeColors
+                Rectangle {
+                  required property var modelData
+                  width: Style.space(16)
+                  height: Style.space(16)
+                  radius: Style.space(3)
+                  color: modelData.hex
+                  border.width: 1
+                  border.color: Qt.darker(root.foreground, 1.8)
+
+                  MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.pickThemeColor(modelData.hex)
+                  }
                 }
               }
             }
