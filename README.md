@@ -219,6 +219,18 @@ Raw sysfs is deliberately **not** used, for reasons worth writing down:
   because OpenRazer accepts it and silently clamps — which reads as a broken
   control.
 
+## Tests
+
+```bash
+python3 tests/test_razerctl.py
+```
+
+Covers the branches local hardware cannot reach. Both devices here are wired,
+so `battery_level` and `available_dpi` only ever raise, and the populated paths
+would otherwise go unexercised: the daemon's `-1` no-reading sentinel, clamping,
+the charging flag, and refusing a DPI step a mouse never advertised. Stubs a
+device rather than a daemon, so it needs no hardware and no `openrazer` import.
+
 ## Requirements
 
 - Omarchy 4.x (Quattro shell)
