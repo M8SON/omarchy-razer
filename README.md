@@ -26,8 +26,8 @@ omarchy plugin add https://github.com/M8SON/omarchy-razer --enable
 ```
 
 > **Note:** the widget drives OpenRazer, which is a system package, and the
-> daemon only sees your devices if you are in the `openrazer` group. Once,
-> then log out and back in:
+> daemon only sees your devices if you are in the `openrazer` group. Run
+> these once, then log out and back in so the group change takes effect:
 >
 > ```bash
 > omarchy pkg add openrazer-daemon python-openrazer
