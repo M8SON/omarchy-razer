@@ -23,6 +23,9 @@ Panel {
 
   property var devices: []
   property string errorText: ""
+  // Guidance, not failure: shown when the daemon is healthy but has nothing
+  // to say (usually the openrazer group before a re-login).
+  property string hintText: ""
   property bool loading: false
   property string selectedSerial: ""
   // Colour is held as HSV so the wheel and the value slider each drive one axis
@@ -235,7 +238,7 @@ Panel {
     if (payload.cmd === "ready") {
       serverReady = true
       serverFailures = 0
-      if (!payload.ok && payload.error) errorText = String(payload.error)
+      if (!payload.ok && payload.error) errorText = friendlyError(payload)
       var queued = outbox
       outbox = []
       for (var i = 0; i < queued.length; i++) send(queued[i])
@@ -243,13 +246,14 @@ Panel {
     }
 
     if (!payload.ok) {
-      errorText = payload.error ? String(payload.error) : "Command failed"
+      errorText = friendlyError(payload)
       loading = false
       return
     }
     errorText = ""
 
     if (payload.cmd === "list") {
+      hintText = plainText(payload.hint || "")
       applyDevices(payload.devices || [])
       loading = false
       return
@@ -608,7 +612,10 @@ Panel {
             title: root.current ? root.current.name : "Razer lighting"
             meta: {
               if (root.errorText !== "") return root.errorText
-              if (root.current === null) return root.loading ? "Looking for devices…" : "No Razer devices found"
+              if (root.current === null) {
+                if (root.loading) return "Looking for devices…"
+                return root.hintText !== "" ? root.hintText : "No Razer devices found"
+              }
               var bits = []
               if (!root.hasLighting) {
                 // A mouse with no RGB still has something worth summarising.

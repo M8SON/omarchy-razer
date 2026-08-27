@@ -66,11 +66,49 @@ EFFECT_ALIASES = {
 
 
 class CommandError(Exception):
-    """A failure that must not take the serve loop down with it."""
+    """A failure that must not take the serve loop down with it.
+
+    `code` is machine-readable for the panel: "setup_required" means the fix
+    is running setup.sh, and the UI shows that command instead of the raw
+    error text.
+    """
+
+    def __init__(self, message, code=None):
+        super().__init__(str(message))
+        self.code = code
 
 
-def fail(message):
-    raise CommandError(str(message))
+def fail(message, code=None):
+    raise CommandError(str(message), code)
+
+
+_daemon_start_attempted = False
+
+
+def try_start_daemon():
+    """One user-level start attempt, mirroring setup.sh's enable step.
+
+    Strictly `systemctl --user` -- no sudo, no package management, nothing an
+    installed-but-stopped daemon doesn't already permit. This turns "installed
+    OpenRazer, rebooted, forgot the unit" from a trip to the terminal into a
+    panel that just works. Attempted once per process so an actually-broken
+    daemon doesn't get hammered on every retry.
+    """
+    global _daemon_start_attempted
+    if _daemon_start_attempted:
+        return False
+    _daemon_start_attempted = True
+    try:
+        import subprocess
+        import time
+        subprocess.run(
+            ["systemctl", "--user", "start", "openrazer-daemon"],
+            check=False, timeout=10,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.5)  # bus name registration can trail the unit slightly
+        return True
+    except Exception:
+        return False
 
 
 def manager(refresh=False):
@@ -80,12 +118,18 @@ def manager(refresh=False):
         try:
             from openrazer.client import DeviceManager
         except ImportError:
-            fail("python-openrazer is not installed")
+            fail("python-openrazer is not installed", "setup_required")
         try:
             _manager = DeviceManager()
         except Exception as exc:
             _manager = None
-            fail("openrazer-daemon unreachable: %s" % exc)
+            if try_start_daemon():
+                try:
+                    _manager = DeviceManager()
+                except Exception:
+                    _manager = None
+            if _manager is None:
+                fail("openrazer-daemon unreachable: %s" % exc, "setup_required")
     return _manager
 
 
@@ -274,7 +318,16 @@ def cmd_list():
             "dpiStages": read_stages(device),
             "poll": read_poll(device),
         })
-    return {"devices": out}
+    result = {"devices": out}
+    if not out:
+        # The daemon is up but sees nothing. With a device plugged in, the
+        # usual cause is the udev group: the sysfs nodes are chowned to
+        # `openrazer`, and a user outside it gets a healthy daemon reporting
+        # zero devices. setup.sh handles it, but only a re-login applies it.
+        result["hint"] = ("No devices reported. If one is plugged in, you may "
+                          "not be in the openrazer group yet -- setup.sh adds "
+                          "you, then log out and back in.")
+    return result
 
 
 def cmd_brightness(serial, raw):
@@ -573,6 +626,8 @@ def serve():
         ready = {"ok": True, "cmd": "ready"}
     except CommandError as exc:
         ready = {"ok": False, "cmd": "ready", "error": str(exc)}
+        if exc.code:
+            ready["code"] = exc.code
     sys.stdout.write(json.dumps(ready) + "\n")
     sys.stdout.flush()
 
@@ -589,6 +644,8 @@ def serve():
             payload["cmd"] = str(argv[0]) if argv else ""
         except CommandError as exc:
             payload = {"ok": False, "cmd": "", "error": str(exc)}
+            if exc.code:
+                payload["code"] = exc.code
         except Exception as exc:
             payload = {"ok": False, "cmd": "", "error": "%s: %s" % (type(exc).__name__, exc)}
         sys.stdout.write(json.dumps(payload) + "\n")
@@ -605,7 +662,10 @@ def main():
     try:
         payload = dispatch(sys.argv[1:])
     except CommandError as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}))
+        out = {"ok": False, "error": str(exc)}
+        if exc.code:
+            out["code"] = exc.code
+        print(json.dumps(out))
         sys.exit(1)
     payload["ok"] = True
     print(json.dumps(payload))

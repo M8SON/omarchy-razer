@@ -204,6 +204,29 @@ with tempfile.TemporaryDirectory() as td:
     check("a FIFO neither blocks nor reads",
           razerctl.cmd_read_theme(fifo), {"themeText": ""})
 
+    razerctl.THEME_ROOTS = saved_roots
+
+
+print("cmd_list / error codes")
+
+saved_devices = razerctl.devices
+razerctl.devices = lambda: []
+empty = razerctl.cmd_list()
+check("an empty device list carries a group-membership hint",
+      "openrazer group" in empty.get("hint", ""), True)
+razerctl.devices = saved_devices
+
+try:
+    razerctl.fail("nope", "setup_required")
+except razerctl.CommandError as exc:
+    check("CommandError carries its code", exc.code, "setup_required")
+    check("CommandError still reads as its message", str(exc), "nope")
+
+try:
+    razerctl.fail("plain failure")
+except razerctl.CommandError as exc:
+    check("a code-less failure has code None", exc.code, None)
+
 print()
 if FAILURES:
     print("%d failing: %s" % (len(FAILURES), ", ".join(FAILURES)))
