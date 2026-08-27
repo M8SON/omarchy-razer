@@ -478,9 +478,32 @@ def cmd_pollrate(serial, raw):
 # normal, and the only consequence of any rejection is an empty swatch row.
 MAX_THEME_BYTES = 64 * 1024
 
+# Only theme palettes are readable, and only from where Omarchy keeps them.
+# O_NOFOLLOW below covers the final component only; a symlinked *parent*
+# directory would still traverse, so resolve the whole path first and require
+# it to land inside the omarchy state or config tree. Same-user either way,
+# so this is defense-in-depth, not a privilege boundary.
+THEME_ROOTS = tuple(
+    os.path.realpath(os.path.join(os.path.expanduser("~"), p))
+    for p in (".local/state/omarchy", ".config/omarchy")
+)
+
+
+def theme_path_allowed(path):
+    # Containment is checked on the fully resolved path (so Omarchy's
+    # `current` symlink into ~/.config/omarchy/themes still works), but the
+    # caller opens the *original* path, so O_NOFOLLOW keeps refusing a
+    # symlink as the final component just as before.
+    if os.path.basename(path) != "colors.toml":
+        return False
+    real = os.path.realpath(path)
+    if os.path.basename(real) != "colors.toml":
+        return False
+    return any(real.startswith(root + os.sep) for root in THEME_ROOTS)
+
 
 def cmd_read_theme(path):
-    if os.path.basename(path) != "colors.toml":
+    if not theme_path_allowed(path):
         return {"themeText": ""}
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)

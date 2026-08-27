@@ -148,11 +148,32 @@ check("a non-numeric value is refused",
 import tempfile
 
 with tempfile.TemporaryDirectory() as td:
+    # cmd_read_theme only serves files inside the omarchy trees; stand the
+    # temp dir in for them so the tests exercise the read path, then check
+    # containment itself against the real (untouched) roots below.
+    saved_roots = razerctl.THEME_ROOTS
+    razerctl.THEME_ROOTS = (os.path.realpath(td),)
+
     good = os.path.join(td, "colors.toml")
     with open(good, "w") as fh:
         fh.write('accent = "#aabbcc"\n')
     check("a regular colors.toml is read back",
           razerctl.cmd_read_theme(good)["themeText"], 'accent = "#aabbcc"\n')
+
+    # Correctly named, readable, and outside the roots -- so only the
+    # containment check can be what refuses it.
+    with tempfile.TemporaryDirectory() as elsewhere:
+        outside = os.path.join(elsewhere, "colors.toml")
+        with open(outside, "w") as fh:
+            fh.write('accent = "#aabbcc"\n')
+        check("a colors.toml outside the theme roots is refused",
+              razerctl.cmd_read_theme(outside), {"themeText": ""})
+
+    escape = os.path.join(td, "escape")
+    os.symlink("/etc", escape)
+    check("a symlinked parent directory cannot escape the roots",
+          razerctl.cmd_read_theme(os.path.join(escape, "colors.toml")),
+          {"themeText": ""})
 
     check("a missing file reads as empty",
           razerctl.cmd_read_theme(os.path.join(td, "absent", "colors.toml")),
