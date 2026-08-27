@@ -304,6 +304,24 @@ Panel {
     return String(name || "").replace(/^Razer\s+/i, "")
   }
 
+  // Device names come from USB descriptors and error text from daemon
+  // exceptions -- neither is trusted. QML Text defaults to AutoText, which
+  // renders HTML-ish content as markup, and the shared qs.Ui components do
+  // not promise PlainText, so strip markup metacharacters at ingestion
+  // rather than hoping every display site is safe.
+  function plainText(s) {
+    return String(s || "").replace(/[<>&]/g, " ").trim()
+  }
+
+  // "setup_required" means the fix is one documented command; showing that
+  // beats showing a Python exception. The path is where `omarchy plugin add`
+  // puts this checkout, so it is the right one on any standard install.
+  function friendlyError(payload) {
+    if (payload.code === "setup_required")
+      return "OpenRazer isn't set up yet — run: bash ~/.config/omarchy/plugins/daedalus.razer/setup.sh"
+    return payload.error ? plainText(payload.error) : "Command failed"
+  }
+
   function slotsFor(name) {
     var slots = colorSlots[name]
     return slots === undefined ? 0 : slots
@@ -391,6 +409,11 @@ Panel {
   }
 
   function applyDevices(list) {
+    // Sanitize once here so every later display site (hero title, tab strip,
+    // error interpolations) gets a clean name for free.
+    for (var s = 0; s < list.length; s++) {
+      if (list[s] && list[s].name !== undefined) list[s].name = plainText(list[s].name)
+    }
     devices = list
     // Open on something that actually has lighting -- landing on a no-RGB mouse
     // hides the whole point of the plugin behind a device switcher.
@@ -438,8 +461,13 @@ Panel {
     stdout: SplitParser { onRead: function(line) { root.handleResponse(line) } }
     stderr: SplitParser {
       onRead: function(line) {
-        var text = String(line || "").trim()
-        if (text !== "") root.errorText = text
+        var text = root.plainText(line)
+        // The openrazer bindings emit DeprecationWarnings on stderr; those
+        // are not errors and should not flash in the panel. Real failures
+        // also arrive as JSON error payloads, so dropping warning noise
+        // loses nothing.
+        if (text === "" || /warning/i.test(text)) return
+        root.errorText = text
       }
     }
     onExited: {
