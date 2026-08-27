@@ -561,8 +561,15 @@ Panel {
       }
     }
     onPressed: function(buttonCode) {
-      if (buttonCode === Qt.MiddleButton) root.refresh()
-      else root.toggle()
+      if (buttonCode === Qt.MiddleButton) {
+        root.refresh()
+        // ensureServer() stops idleTimer, and with the panel closed nothing
+        // else restarts it -- without this, a middle-click refresh leaves
+        // the helper resident forever instead of for 45 seconds.
+        if (!root.opened) idleTimer.restart()
+      } else {
+        root.toggle()
+      }
     }
   }
 
