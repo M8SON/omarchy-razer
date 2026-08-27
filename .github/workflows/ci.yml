@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No hardware, no daemon, no openrazer import needed: the tests stub
+      # devices and razerctl only imports openrazer inside manager().
+      - name: Unit tests
+        run: python3 tests/test_razerctl.py
+
+      - name: Python lint (pyflakes)
+        run: |
+          pip install pyflakes --quiet
+          python3 -m pyflakes razerctl.py tests/test_razerctl.py
+
+      - name: Shell lint (shellcheck)
+        run: |
+          sudo apt-get install -y -q shellcheck
+          shellcheck setup.sh theme-hook.sh
+
+      - name: Manifest is valid JSON with required keys
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          m = json.load(open("manifest.json"))
+          required = ["schemaVersion", "id", "name", "version", "entryPoints"]
+          missing = [k for k in required if k not in m]
+          if missing:
+              sys.exit("manifest.json missing: %s" % ", ".join(missing))
+          entry = m["entryPoints"].get("barWidget")
+          import os
+          if not entry or not os.path.isfile(entry):
+              sys.exit("entryPoints.barWidget does not point at a file")
+          print("manifest ok:", m["id"], m["version"])
+          EOF
+
+      # qmllint is deliberately absent: Panel.qml imports Quickshell and the
+      # Omarchy shell's own qs.Commons/qs.Ui modules, none of which exist on a
+      # runner, so every run would fail on unresolved imports. A permanently
+      # red (or permanently ignored yellow) step is worse than no step.
