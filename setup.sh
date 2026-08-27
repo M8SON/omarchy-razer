@@ -14,8 +14,8 @@ say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 
 # 1. Driver and Python bindings.
 if ! pacman -Qq openrazer-daemon >/dev/null 2>&1; then
-  say "Installing openrazer-daemon (AUR, builds a DKMS kernel module)"
-  omarchy pkg aur add openrazer-daemon python-openrazer
+  say "Installing openrazer-daemon (official repo; pulls in a DKMS kernel module)"
+  omarchy pkg add openrazer-daemon python-openrazer
 else
   say "openrazer-daemon already installed"
 fi
