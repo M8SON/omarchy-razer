@@ -32,11 +32,16 @@ omarchy plugin add https://github.com/M8SON/omarchy-razer --enable
 > ```bash
 > omarchy pkg add openrazer-daemon python-openrazer
 > sudo gpasswd -a "$USER" openrazer
+> mkdir -p ~/.config/openrazer && printf '[Startup]\nrestore_persistence = True\n' >> ~/.config/openrazer/razer.conf
 > ```
+>
+> The third line makes the lighting come back after a reboot; OpenRazer ships
+> with `restore_persistence = False`, so without it the daemon saves your
+> effect on exit and then ignores it.
 
-Until that is done the panel says so and names the command. The bundled
-`setup.sh` does the same two steps and also sets `restore_persistence = True`
-and enables the daemon at login, so the lighting comes back after a reboot:
+Until that is done the panel says so and names the command. `setup.sh` in the
+plugin folder does the same three steps, checks before touching an existing
+`razer.conf`, and enables the daemon at login:
 
 ```bash
 bash ~/.config/omarchy/plugins/daedalus.razer/setup.sh
