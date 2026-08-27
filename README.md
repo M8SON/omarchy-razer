@@ -22,13 +22,29 @@ instead, so it behaves like every other Omarchy widget.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/M8SON/omarchy-razer
-bash ~/.config/omarchy/plugins/daedalus.razer/setup.sh   # first time only
-omarchy plugin enable daedalus.razer right
+omarchy plugin add https://github.com/M8SON/omarchy-razer --enable
 ```
 
-`setup.sh` installs `openrazer-daemon`, adds you to the `openrazer` group, and
-sets `restore_persistence = True`. Skip it only if OpenRazer already works.
+> **Note:** the widget drives OpenRazer, which is a system package, and the
+> daemon only sees your devices if you are in the `openrazer` group. Once,
+> then log out and back in:
+>
+> ```bash
+> omarchy pkg add openrazer-daemon python-openrazer
+> sudo gpasswd -a "$USER" openrazer
+> ```
+
+Until that is done the panel says so and names the command. The bundled
+`setup.sh` does the same two steps and also sets `restore_persistence = True`
+and enables the daemon at login, so the lighting comes back after a reboot:
+
+```bash
+bash ~/.config/omarchy/plugins/daedalus.razer/setup.sh
+```
+
+The plugin makes no network connections. It ships no OpenRazer code and talks to
+whatever `openrazer-daemon` the system has over D-Bus; both update through
+`pacman -Syu` and `omarchy plugin update`, never on their own.
 
 ## Uninstall
 
