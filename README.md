@@ -25,6 +25,11 @@ instead, so it behaves like every other Omarchy widget.
 omarchy plugin add https://github.com/M8SON/omarchy-razer --enable
 ```
 
+If you installed this before 0.3.4, it went in under the old `daedalus.razer`
+ID. Take that copy off first — `omarchy plugin remove daedalus.razer` — then
+add it again with the line above; the install directory is named after the ID,
+so the two would otherwise sit side by side.
+
 > **Note:** the widget drives OpenRazer, which is a system package, and the
 > daemon only sees your devices if you are in the `openrazer` group. Run
 > these once, then log out and back in so the group change takes effect:
