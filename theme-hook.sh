@@ -4,7 +4,7 @@
 #
 # Off by default. Turn it on by linking it into the hook directory:
 #
-#   ln -sf ~/.config/omarchy/plugins/daedalus.razer/theme-hook.sh \
+#   ln -sf ~/.config/omarchy/plugins/io.github.m8son.razer/theme-hook.sh \
 #          ~/.config/omarchy/hooks/theme-set.d/razer
 #
 # and off again by deleting that link. omarchy-hook runs each file in
@@ -16,7 +16,7 @@
 # runs on every theme change must never be noisy or fail the switch.
 
 THEME_DIR="$HOME/.local/state/omarchy/current/theme"
-PLUGIN_DIR="$HOME/.config/omarchy/plugins/daedalus.razer"
+PLUGIN_DIR="$HOME/.config/omarchy/plugins/io.github.m8son.razer"
 
 color=""
 

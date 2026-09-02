@@ -44,7 +44,7 @@ plugin folder does the same three steps, checks before touching an existing
 `razer.conf`, and enables the daemon at login:
 
 ```bash
-bash ~/.config/omarchy/plugins/daedalus.razer/setup.sh
+bash ~/.config/omarchy/plugins/io.github.m8son.razer/setup.sh
 ```
 
 The plugin makes no network connections. It ships no OpenRazer code and talks to
@@ -55,8 +55,8 @@ whatever `openrazer-daemon` the system has over D-Bus; both update through
 
 ```bash
 rm -f ~/.config/omarchy/hooks/theme-set.d/razer   # if you linked the hook
-omarchy plugin disable daedalus.razer
-omarchy plugin remove daedalus.razer
+omarchy plugin disable io.github.m8son.razer
+omarchy plugin remove io.github.m8son.razer
 ```
 
 That takes the widget off the bar and deletes the plugin folder. `setup.sh`
@@ -110,7 +110,7 @@ clicks, link the bundled hook so the colour is reapplied whenever the theme
 changes:
 
 ```bash
-ln -sf ~/.config/omarchy/plugins/daedalus.razer/theme-hook.sh \
+ln -sf ~/.config/omarchy/plugins/io.github.m8son.razer/theme-hook.sh \
        ~/.config/omarchy/hooks/theme-set.d/razer
 ```
 

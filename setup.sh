@@ -83,4 +83,4 @@ fi
 say "Enabling openrazer-daemon for this user"
 systemctl --user enable --now openrazer-daemon
 
-say "Done. Add the widget with: omarchy plugin enable daedalus.razer right"
+say "Done. Add the widget with: omarchy plugin enable io.github.m8son.razer right"

@@ -13,8 +13,8 @@ import qs.Ui
 // nothing, while the daemon reports the truth.
 Panel {
   id: root
-  moduleName: "daedalus.razer"
-  ipcTarget: "daedalus.razer"
+  moduleName: "io.github.m8son.razer"
+  ipcTarget: "io.github.m8son.razer"
 
   // The bar sizes each widget slot from these (Bar.qml: activeItem.implicitWidth);
   // without them the slot is 0x0 and the icon never renders.
@@ -322,7 +322,7 @@ Panel {
   // puts this checkout, so it is the right one on any standard install.
   function friendlyError(payload) {
     if (payload.code === "setup_required")
-      return "OpenRazer isn't set up yet — run: bash ~/.config/omarchy/plugins/daedalus.razer/setup.sh"
+      return "OpenRazer isn't set up yet — run: bash ~/.config/omarchy/plugins/io.github.m8son.razer/setup.sh"
     return payload.error ? plainText(payload.error) : "Command failed"
   }
 
