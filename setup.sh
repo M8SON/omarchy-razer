@@ -8,25 +8,37 @@
 
 set -euo pipefail
 
-CONF="$HOME/.config/openrazer/razer.conf"
+# Every tool below runs from the system directory, never from whatever the
+# inherited PATH puts first: a user-writable directory ahead of /usr/bin must
+# not be able to stand in for sudo, pacman or gpasswd. (`omarchy pkg add` is
+# `sudo pacman -S --needed` under the hood; calling pacman directly keeps the
+# privileged step on a fixed path too.)
+PATH=/usr/bin
+export PATH
+
+HERE="$(dirname "${BASH_SOURCE[0]}")"
+CONF_DIR="$HOME/.config/openrazer"
 
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 
 # 1. Driver and Python bindings.
-if ! pacman -Qq openrazer-daemon >/dev/null 2>&1; then
+if ! /usr/bin/pacman -Qq openrazer-daemon >/dev/null 2>&1; then
   say "Installing openrazer-daemon (official repo; pulls in a DKMS kernel module)"
-  omarchy pkg add openrazer-daemon python-openrazer
+  /usr/bin/sudo /usr/bin/pacman -S --needed openrazer-daemon python-openrazer
 else
   say "openrazer-daemon already installed"
 fi
 
 # 2. Group membership. The udev rules chown the sysfs nodes to the openrazer
 #    group; without it the daemon starts fine and reports zero devices.
-if id -nG "$USER" | tr ' ' '\n' | grep -qx openrazer; then
+#    The user comes from the kernel via id(1), not from $USER, which is just
+#    an inherited environment variable.
+me="$(/usr/bin/id -un)"
+if /usr/bin/id -nG | /usr/bin/tr ' ' '\n' | /usr/bin/grep -qx openrazer; then
   say "Already in the openrazer group"
 else
-  say "Adding $USER to the openrazer group"
-  sudo gpasswd -a "$USER" openrazer
+  say "Adding $me to the openrazer group"
+  /usr/bin/sudo /usr/bin/gpasswd -a "$me" openrazer
   say "Log out and back in for the group to take effect"
 fi
 
@@ -34,53 +46,15 @@ fi
 #    but only reads it back at startup when this is True -- which is why lights
 #    come back dead after a reboot on a default install.
 #
-#    razer.conf sits at a predictable path under $HOME, so this refuses to edit
-#    through a symlink or a non-regular file: `sed -i` and `>>` would follow one
-#    and rewrite whatever it points at. The write itself goes to a private temp
-#    file in the same directory and is renamed into place, so the config is
-#    replaced atomically and never edited in place.
-CONF_DIR="$(dirname "$CONF")"
-
-if [[ -L $CONF_DIR ]]; then
-  echo "refusing: $CONF_DIR is a symlink" >&2
-  exit 1
-fi
-mkdir -p "$CONF_DIR"
-if [[ ! -d $CONF_DIR ]]; then
-  echo "refusing: $CONF_DIR is not a directory" >&2
-  exit 1
-fi
-if [[ -L $CONF ]]; then
-  echo "refusing: $CONF is a symlink" >&2
-  exit 1
-fi
-if [[ -e $CONF && ! -f $CONF ]]; then
-  echo "refusing: $CONF is not a regular file" >&2
-  exit 1
-fi
-
-if [[ -f $CONF ]] && grep -q '^restore_persistence = True' "$CONF"; then
-  say "restore_persistence already True"
-else
-  say "Setting restore_persistence = True"
-  tmp="$(mktemp "$CONF_DIR/.razer.conf.XXXXXX")"
-  trap 'rm -f "${tmp:-}"' EXIT
-  if [[ -f $CONF ]]; then
-    if grep -q '^restore_persistence' "$CONF"; then
-      sed 's/^restore_persistence.*/restore_persistence = True/' "$CONF" >"$tmp"
-    else
-      { cat "$CONF"; printf '\n[Startup]\nrestore_persistence = True\n'; } >"$tmp"
-    fi
-  else
-    printf '[Startup]\nrestore_persistence = True\n' >"$tmp"
-  fi
-  chmod 644 "$tmp"
-  mv -f "$tmp" "$CONF"
-  trap - EXIT
-fi
+#    razer.conf sits at a predictable path under $HOME. A shell check-then-edit
+#    (test -L, then sed/mv by name) leaves a window in which the file can be
+#    swapped for a symlink; persistence.py holds the directory open and does
+#    every open, read, create and rename through that descriptor instead.
+say "Setting restore_persistence = True"
+/usr/bin/python3 "$HERE/persistence.py" "$CONF_DIR"
 
 # 4. Daemon.
 say "Enabling openrazer-daemon for this user"
-systemctl --user enable --now openrazer-daemon
+/usr/bin/systemctl --user enable --now openrazer-daemon
 
 say "Done. Add the widget with: omarchy plugin enable io.github.m8son.razer right"

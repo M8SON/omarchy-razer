@@ -227,6 +227,135 @@ try:
 except razerctl.CommandError as exc:
     check("a code-less failure has code None", exc.code, None)
 
+print("serve: bounded command lines")
+
+import io
+import json
+
+saved_serve = (razerctl.manager, razerctl.dispatch, sys.stdin, sys.stdout)
+razerctl.manager = lambda refresh=False: None
+razerctl.dispatch = lambda argv: {"echo": argv}
+
+# One line past the cap, then a line exactly at it, then an ordinary command.
+# The oversized line must be refused and fully discarded so the two that follow
+# still parse -- a partial line left in the buffer would be read as a command.
+cap = razerctl.MAX_COMMAND_BYTES
+oversized = b'["' + b"x" * cap + b'"]\n'
+at_cap = b'["' + b"x" * (cap - 4) + b'"]\n'
+sys.stdin = io.TextIOWrapper(io.BytesIO(oversized + at_cap + b'["list"]\n'))
+sys.stdout = io.StringIO()
+try:
+    razerctl.serve()
+    replies = [json.loads(l) for l in sys.stdout.getvalue().splitlines()]
+finally:
+    razerctl.manager, razerctl.dispatch, sys.stdin, sys.stdout = saved_serve
+
+check("serve announces ready", replies[0], {"ok": True, "cmd": "ready"})
+check("an oversized line is refused", replies[1]["ok"], False)
+check("and says why", "exceeds" in replies[1]["error"], True)
+check("a line at the cap is accepted",
+      replies[2]["echo"], ["x" * (cap - 4)])
+check("the command after an oversized line still runs",
+      replies[3], {"echo": ["list"], "ok": True, "cmd": "list"})
+check("nothing else was emitted", len(replies), 4)
+
+
+print("try_start_daemon: fixed executable path")
+
+calls = []
+saved_run, saved_sleep = razerctl.subprocess.run, razerctl.time.sleep
+razerctl.subprocess.run = lambda argv, **kw: calls.append(argv)
+razerctl.time.sleep = lambda s: None
+razerctl._daemon_start_attempted = False
+try:
+    first = razerctl.try_start_daemon()
+    second = razerctl.try_start_daemon()
+finally:
+    razerctl.subprocess.run, razerctl.time.sleep = saved_run, saved_sleep
+check("systemctl is run by absolute path, not PATH lookup",
+      calls, [["/usr/bin/systemctl", "--user", "start", "openrazer-daemon"]])
+check("the first attempt reports it tried", first, True)
+check("a second attempt in the same process is skipped", second, False)
+
+
+print("persistence.py: descriptor-bound razer.conf edit")
+
+spec = importlib.util.spec_from_file_location(
+    "persistence", os.path.join(HERE, os.pardir, "persistence.py"))
+persistence = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(persistence)
+
+def conf_text(d):
+    with open(os.path.join(d, "razer.conf")) as fh:
+        return fh.read()
+
+def leftovers(d):
+    return sorted(n for n in os.listdir(d) if n != "razer.conf")
+
+def refused(d):
+    try:
+        persistence.enable_persistence(d)
+    except persistence.Refused as exc:
+        return str(exc)
+    return None
+
+with tempfile.TemporaryDirectory() as td:
+    fresh = os.path.join(td, "fresh", "openrazer")
+    check("a missing directory and file are created",
+          persistence.enable_persistence(fresh), "updated")
+    check("with just the Startup section",
+          conf_text(fresh), "[Startup]\nrestore_persistence = True\n")
+    check("and no temp file left behind", leftovers(fresh), [])
+    check("a second run leaves it alone",
+          persistence.enable_persistence(fresh), "already")
+
+    d = os.path.join(td, "false")
+    os.makedirs(d)
+    with open(os.path.join(d, "razer.conf"), "w") as fh:
+        fh.write("[General]\nverbose_logging = False\n\n[Startup]\n"
+                 "restore_persistence = False\nsync_effects_enabled = True\n")
+    check("an existing False is flipped in place",
+          persistence.enable_persistence(d), "updated")
+    check("without touching neighbouring keys",
+          conf_text(d), "[General]\nverbose_logging = False\n\n[Startup]\n"
+          "restore_persistence = True\nsync_effects_enabled = True\n")
+    check("and no temp file left behind", leftovers(d), [])
+
+    d = os.path.join(td, "nokey")
+    os.makedirs(d)
+    with open(os.path.join(d, "razer.conf"), "w") as fh:
+        fh.write("[General]\nverbose_logging = False\n")
+    persistence.enable_persistence(d)
+    check("a file without the key gains a Startup section",
+          conf_text(d), "[General]\nverbose_logging = False\n\n[Startup]\n"
+          "restore_persistence = True\n")
+
+    d = os.path.join(td, "linkdir")
+    os.symlink(fresh, d)
+    check("a symlinked config directory is refused",
+          "symlink" in (refused(d) or ""), True)
+
+    d = os.path.join(td, "linkfile")
+    os.makedirs(d)
+    os.symlink(os.path.join(fresh, "razer.conf"), os.path.join(d, "razer.conf"))
+    check("a symlinked razer.conf is refused",
+          "symlink" in (refused(d) or ""), True)
+    check("and the link target is untouched",
+          conf_text(fresh), "[Startup]\nrestore_persistence = True\n")
+
+    d = os.path.join(td, "fifo")
+    os.makedirs(d)
+    os.mkfifo(os.path.join(d, "razer.conf"))
+    check("a FIFO neither blocks nor is rewritten",
+          "regular file" in (refused(d) or ""), True)
+
+    d = os.path.join(td, "big")
+    os.makedirs(d)
+    with open(os.path.join(d, "razer.conf"), "wb") as fh:
+        fh.write(b"x" * (persistence.MAX_CONF_BYTES + 1))
+    check("an oversized file is refused rather than rewritten",
+          "large" in (refused(d) or ""), True)
+
 print()
 if FAILURES:
     print("%d failing: %s" % (len(FAILURES), ", ".join(FAILURES)))

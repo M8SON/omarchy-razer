@@ -28,7 +28,9 @@ capped updates at ~9/sec. Held open, samples land in single-digit milliseconds.
 import json
 import os
 import stat
+import subprocess
 import sys
+import time
 
 # Effects we expose, in menu order: (name, gating capability, colours consumed).
 #
@@ -52,6 +54,15 @@ EFFECTS = [
 ]
 
 _manager = None
+
+# Started by absolute path so a user-writable directory earlier in PATH can
+# never stand in for it. setup.sh pins its tools the same way.
+SYSTEMCTL = "/usr/bin/systemctl"
+
+# Longest command line `serve` will read. A real command is a short JSON array
+# (a serial, an effect name, a few colour bytes) and stays well under this;
+# anything longer is refused and discarded rather than buffered.
+MAX_COMMAND_BYTES = 4096
 
 # The daemon reports its internal effect names; the plugin uses short ones.
 EFFECT_ALIASES = {
@@ -99,10 +110,8 @@ def try_start_daemon():
         return False
     _daemon_start_attempted = True
     try:
-        import subprocess
-        import time
         subprocess.run(
-            ["systemctl", "--user", "start", "openrazer-daemon"],
+            [SYSTEMCTL, "--user", "start", "openrazer-daemon"],
             check=False, timeout=10,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(0.5)  # bus name registration can trail the unit slightly
@@ -618,6 +627,26 @@ def dispatch(argv):
     fail("unknown command %s" % command)
 
 
+def read_command(stream):
+    """One line from the serve pipe, or None at EOF.
+
+    Reads at most MAX_COMMAND_BYTES before deciding. A longer line is drained
+    to its newline in bounded chunks and refused, so a hostile or runaway
+    writer can neither grow memory nor leave a half-line that the next read
+    would mistake for a command.
+    """
+    line = stream.readline(MAX_COMMAND_BYTES + 1)
+    if not line:
+        return None
+    if len(line) <= MAX_COMMAND_BYTES or line.endswith(b"\n"):
+        return line
+    while True:
+        rest = stream.readline(MAX_COMMAND_BYTES)
+        if not rest or rest.endswith(b"\n"):
+            break
+    fail("command line exceeds %d bytes" % MAX_COMMAND_BYTES)
+
+
 def serve():
     # Warm the import and the D-Bus connection before announcing readiness, so
     # the first real command is as fast as the rest.
@@ -631,7 +660,16 @@ def serve():
     sys.stdout.write(json.dumps(ready) + "\n")
     sys.stdout.flush()
 
-    for line in sys.stdin:
+    while True:
+        try:
+            line = read_command(sys.stdin.buffer)
+        except CommandError as exc:
+            payload = {"ok": False, "cmd": "", "error": str(exc)}
+            sys.stdout.write(json.dumps(payload) + "\n")
+            sys.stdout.flush()
+            continue
+        if line is None:
+            break
         line = line.strip()
         if not line:
             continue

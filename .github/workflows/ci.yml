@@ -19,7 +19,7 @@ jobs:
       - name: Python lint (pyflakes)
         run: |
           pip install pyflakes --quiet
-          python3 -m pyflakes razerctl.py tests/test_razerctl.py
+          python3 -m pyflakes razerctl.py persistence.py tests/test_razerctl.py
 
       - name: Shell lint (shellcheck)
         run: |
