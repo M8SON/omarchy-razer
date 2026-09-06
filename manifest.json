@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.m8son.razer",
   "name": "Razer lighting",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "author": "M8SON",
   "license": "MIT",
   "description": "Control OpenRazer keyboards and mice from the Omarchy bar without the polychromatic tray applet. Brightness, every effect the device advertises (spectrum, static, breath, wave, reactive, ripple, starlight), and a full HSV colour wheel that applies instantly. A theme palette row picks up the running Omarchy theme, and an optional hook keeps the keyboard matched to it. Mice get DPI and polling-rate controls; wireless devices show battery. All over D-Bus to openrazer-daemon; no network access.",

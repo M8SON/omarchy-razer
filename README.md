@@ -53,8 +53,11 @@ bash ~/.config/omarchy/plugins/io.github.m8son.razer/setup.sh
 ```
 
 The plugin makes no network connections. It ships no OpenRazer code and talks to
-whatever `openrazer-daemon` the system has over D-Bus; both update through
-`pacman -Syu` and `omarchy plugin update`, never on their own.
+whatever `openrazer-daemon` the system has over D-Bus. `setup.sh` installs a
+fixed OpenRazer release (3.12.4-1) from the Arch Linux Archive and checks each
+package against a sha256 recorded in the script before `pacman -U` sees it, so a
+fresh install gets the same driver that was reviewed. After that both update
+through `pacman -Syu` and `omarchy plugin update`, never on their own.
 
 ## Uninstall
 
