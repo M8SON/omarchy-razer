@@ -45,19 +45,19 @@ so the two would otherwise sit side by side.
 > effect on exit and then ignores it.
 
 Until that is done the panel says so and names the command. `setup.sh` in the
-plugin folder does the same three steps, checks before touching an existing
-`razer.conf`, and enables the daemon at login:
+plugin folder checks that the packages are installed and stops if they are not,
+then does the other two steps, checks before touching an existing `razer.conf`,
+and enables the daemon at login:
 
 ```bash
 bash ~/.config/omarchy/plugins/io.github.m8son.razer/setup.sh
 ```
 
 The plugin makes no network connections. It ships no OpenRazer code and talks to
-whatever `openrazer-daemon` the system has over D-Bus. `setup.sh` installs a
-fixed OpenRazer release (3.12.4-1) from the Arch Linux Archive and checks each
-package against a sha256 recorded in the script before `pacman -U` sees it, so a
-fresh install gets the same driver that was reviewed. After that both update
-through `pacman -Syu` and `omarchy plugin update`, never on their own.
+whatever `openrazer-daemon` the system has over D-Bus. OpenRazer is a system
+package that pacman owns: nothing in this repository installs, pins or verifies
+it, and it updates through `pacman -Syu` like every other package. The plugin
+itself updates through `omarchy plugin update`, never on its own.
 
 ## Uninstall
 
@@ -68,8 +68,10 @@ omarchy plugin remove io.github.m8son.razer
 ```
 
 That takes the widget off the bar and deletes the plugin folder. `setup.sh`
-changed three things *outside* the plugin, and none of them are reverted
-automatically — undo them only if you want OpenRazer gone entirely:
+changed three things *outside* the plugin — the daemon unit, your group
+membership and `razer.conf` — and none of them are reverted automatically. Undo
+them, and drop the packages you installed, only if you want OpenRazer gone
+entirely:
 
 ```bash
 systemctl --user disable --now openrazer-daemon
@@ -267,7 +269,8 @@ device rather than a daemon, so it needs no hardware and no `openrazer` import.
 
 - Omarchy 4.x (Quattro shell)
 - `openrazer-daemon` and `python-openrazer`
-- `python3` on `PATH` (the widget runs the bundled `razerctl.py` helper with it)
+- `/usr/bin/python3` (the widget and the theme hook run the bundled `razerctl.py`
+  helper with it, by that path)
 - Membership in the `openrazer` group
 
 ## Notes for other plugin authors

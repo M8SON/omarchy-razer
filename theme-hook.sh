@@ -15,6 +15,11 @@
 # apply it, and exit quietly whenever there is nothing to do -- a hook that
 # runs on every theme change must never be noisy or fail the switch.
 
+# Same rule as setup.sh and razerctl.py: every tool runs from the system
+# directory, never from whatever the inherited PATH puts first.
+PATH=/usr/bin
+export PATH
+
 THEME_DIR="$HOME/.local/state/omarchy/current/theme"
 PLUGIN_DIR="$HOME/.config/omarchy/plugins/io.github.m8son.razer"
 
@@ -29,22 +34,22 @@ color=""
 # descriptor-bound in razerctl.py.)
 read_small() {
   [[ ! -L $1 && -f $1 ]] || return 1
-  head -c 65536 -- "$1" 2>/dev/null
+  /usr/bin/head -c 65536 -- "$1" 2>/dev/null
 }
 
 # A theme may ship an explicit keyboard colour. Prefer it: it is the value the
 # theme author chose for hardware, which is not always the accent.
-color=$(read_small "$THEME_DIR/keyboard.rgb" | tr -d '#[:space:]')
+color=$(read_small "$THEME_DIR/keyboard.rgb" | /usr/bin/tr -d '#[:space:]')
 
 # Otherwise fall back to the accent, which is what the panel's swatch row
 # leads with, so the hook and the UI agree on what "the theme colour" means.
 if [[ ! $color =~ ^[0-9A-Fa-f]{6}$ ]]; then
   color=$(read_small "$THEME_DIR/colors.toml" \
-    | sed -n 's/^accent[[:space:]]*=[[:space:]]*"#\([0-9A-Fa-f]\{6\}\)".*/\1/p' \
-    | head -1)
+    | /usr/bin/sed -n 's/^accent[[:space:]]*=[[:space:]]*"#\([0-9A-Fa-f]\{6\}\)".*/\1/p' \
+    | /usr/bin/head -1)
 fi
 
 [[ $color =~ ^[0-9A-Fa-f]{6}$ ]] || exit 0
 [[ -f $PLUGIN_DIR/razerctl.py ]] || exit 0
 
-python3 "$PLUGIN_DIR/razerctl.py" theme "$color" >/dev/null 2>&1 || true
+/usr/bin/python3 "$PLUGIN_DIR/razerctl.py" theme "$color" >/dev/null 2>&1 || true

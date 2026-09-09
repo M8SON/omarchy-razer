@@ -460,7 +460,10 @@ Panel {
   // command silently queues forever.
   Process {
     id: server
-    command: root.helperPath === "" ? [] : ["python3", root.helperPath, "serve"]
+    // The interpreter is named by absolute path, like every tool setup.sh and
+    // theme-hook.sh run, so a user-writable directory earlier in PATH can
+    // never stand in for it.
+    command: root.helperPath === "" ? [] : ["/usr/bin/python3", root.helperPath, "serve"]
     stdinEnabled: true
     stdout: SplitParser { onRead: function(line) { root.handleResponse(line) } }
     stderr: SplitParser {
